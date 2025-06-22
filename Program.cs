@@ -61,7 +61,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = builder.Configuration["Jwt:Audience"],
             IssuerSigningKey = key,
             RoleClaimType = ClaimTypes.Role,
-            ClockSkew = TimeSpan.Zero // Reduce the default clock skew from 5 minutes to 0
+            ClockSkew = TimeSpan.Zero
         };
         
         options.Events = new JwtBearerEvents
@@ -146,5 +146,12 @@ app.UseSwaggerUI(c =>
 
 app.MapControllers();
 app.MapHub<ChatHub>("/chathub");
+app.MapGet("/health", () => "OK");
 
-app.Run();
+if (app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+}
+
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+app.Run($"http://0.0.0.0:{port}");
