@@ -41,29 +41,31 @@ namespace olx_be_api.Services
             var timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
             var httpMethod = "POST";
 
-            var payload = new Dictionary<string, object>
+            var lineItems = request.LineItems.Select(item => new
             {
-                ["order"] = new Dictionary<string, object>
+                name = item.Name,
+                price = item.Price,
+                quantity = item.Quantity
+            }).ToArray();
+
+            var payload = new
+            {
+                order = new
                 {
-                    ["amount"] = request.Amount,
-                    ["invoice_number"] = request.InvoiceNumber,
-                    ["currency"] = "IDR",
-                    ["callback_url"] = callbackUrl,
-                    ["line_items"] = request.LineItems.Select(item => new Dictionary<string, object>
-                    {
-                        ["name"] = item.Name,
-                        ["price"] = item.Price,
-                        ["quantity"] = item.Quantity
-                    }).ToArray()
+                    amount = request.Amount,
+                    invoice_number = request.InvoiceNumber,
+                    currency = "IDR",
+                    callback_url = callbackUrl,
+                    line_items = lineItems
                 },
-                ["payment"] = new Dictionary<string, object>
+                payment = new
                 {
-                    ["payment_due_date"] = 60
+                    payment_due_date = 60
                 },
-                ["customer"] = new Dictionary<string, object>
+                customer = new
                 {
-                    ["name"] = request.CustomerName,
-                    ["email"] = request.CustomerEmail
+                    name = request.CustomerName,
+                    email = request.CustomerEmail
                 }
             };
 
@@ -80,12 +82,33 @@ namespace olx_be_api.Services
 
             var requestJson = JsonConvert.SerializeObject(payload, jsonSettings);
 
+            try
+            {
+                JsonConvert.DeserializeObject(requestJson);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Generated JSON is invalid: {Json}", requestJson);
+                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Invalid JSON generated" };
+            }
+
             _logger.LogInformation("=== DOKU SIGNATURE DEBUG ===");
             _logger.LogInformation("1. HTTP Method: {HttpMethod}", httpMethod);
             _logger.LogInformation("2. Endpoint Path: {EndpointPath}", endpointPath);
             _logger.LogInformation("3. Client ID: {ClientId}", clientId);
             _logger.LogInformation("4. Timestamp: {Timestamp}", timestamp);
             _logger.LogInformation("5. Minified JSON: {RequestJson}", requestJson);
+            _logger.LogInformation("5a. JSON Length: {Length} characters", requestJson.Length);
+
+            var suspiciousChars = new[] { ';', '\n', '\r', '\t' };
+            foreach (var chr in suspiciousChars)
+            {
+                if (requestJson.Contains(chr))
+                {
+                    _logger.LogWarning("Found suspicious character '{Char}' in JSON at position {Position}",
+                        chr, requestJson.IndexOf(chr));
+                }
+            }
 
             string hexBodyHash;
             using (var sha256 = SHA256.Create())
@@ -143,6 +166,7 @@ namespace olx_be_api.Services
                 {
                     _logger.LogError("DOKU API Error: {StatusCode} - {Content}", response.StatusCode, responseContent);
 
+                    // Try to parse error response
                     try
                     {
                         var errorResponse = JsonConvert.DeserializeObject<dynamic>(responseContent);
