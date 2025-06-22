@@ -1,8 +1,6 @@
 ﻿using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 
@@ -26,19 +24,22 @@ namespace olx_be_api.Services
             var dokuConfig = _configuration.GetSection("DokuSettings");
             var clientId = dokuConfig["ClientId"];
             var secretKey = dokuConfig["SecretKey"];
-            var apiUrl = dokuConfig["ApiUrl"];
+            var apiBaseUrl = dokuConfig["ApiUrl"];
             var callbackUrl = dokuConfig["CallbackUrl"]?.Trim();
 
-            var requestPath = "/checkout/v1/payment";
+            var endpointPath = "/checkout/v1/payment";
+            var fullUrl = apiBaseUrl?.TrimEnd('/') + endpointPath;
 
-            if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(secretKey) || string.IsNullOrEmpty(apiUrl) || string.IsNullOrEmpty(callbackUrl))
+            if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(secretKey) ||
+                string.IsNullOrEmpty(apiBaseUrl) || string.IsNullOrEmpty(callbackUrl))
             {
                 _logger.LogError("DokuSettings (ClientId, SecretKey, ApiUrl, atau CallbackUrl) tidak dikonfigurasi dengan benar.");
                 return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Konfigurasi DOKU tidak lengkap." };
             }
 
             var requestId = Guid.NewGuid().ToString();
-            var requestTimestamp = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
+            var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
+            var httpMethod = "POST";
 
             var payload = new
             {
@@ -55,15 +56,8 @@ namespace olx_be_api.Services
                         quantity = item.Quantity
                     })
                 },
-                payment = new
-                {
-                    payment_due_date = 60
-                },
-                customer = new
-                {
-                    name = request.CustomerName,
-                    email = request.CustomerEmail
-                }
+                payment = new { payment_due_date = 60 },
+                customer = new { name = request.CustomerName, email = request.CustomerEmail }
             };
 
             var jsonSettings = new JsonSerializerSettings
@@ -76,60 +70,54 @@ namespace olx_be_api.Services
             };
 
             var requestJson = JsonConvert.SerializeObject(payload, jsonSettings);
-
-            var requestBodyBytes = Encoding.UTF8.GetBytes(requestJson);
             using var sha256 = SHA256.Create();
-            var hashBytes = sha256.ComputeHash(requestBodyBytes);
-            var digest = "SHA-256=" + Convert.ToBase64String(hashBytes);
+            var bodyHash = sha256.ComputeHash(Encoding.UTF8.GetBytes(requestJson));
+            var hexBodyHash = BitConverter.ToString(bodyHash).Replace("-", "").ToLowerInvariant();
 
-            var signatureComponent = $"Client-Id:{clientId}\n" +
-                                   $"Request-Id:{requestId}\n" +
-                                   $"Request-Timestamp:{requestTimestamp}\n" +
-                                   $"Request-Target:{requestPath}\n" +
-                                   $"Digest:{digest}";
-
+            var stringToSign = $"{httpMethod}:{endpointPath}:{clientId}:{hexBodyHash}:{timestamp}";
             using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey));
-            var signature = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(signatureComponent)));
+            var signatureBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(stringToSign));
+            var finalSignature = Convert.ToBase64String(signatureBytes);
 
-            _logger.LogInformation("--- DOKU Payment Creation ---");
-            _logger.LogInformation("Request Body (JSON): {RequestBody}", requestJson);
+            _logger.LogInformation("Request JSON: {RequestJson}", requestJson);
+            _logger.LogInformation("StringToSign: {StringToSign}", stringToSign);
+            _logger.LogInformation("Signature: {Signature}", finalSignature);
 
             try
             {
-                var httpRequest = new HttpRequestMessage(HttpMethod.Post, apiUrl + requestPath);
-                httpRequest.Headers.Add("Client-Id", clientId);
-                httpRequest.Headers.Add("Request-Id", requestId);
-                httpRequest.Headers.Add("Request-Timestamp", requestTimestamp);
-                httpRequest.Headers.Add("Digest", digest);
-                httpRequest.Headers.Add("Signature", $"HMACSHA256={signature}");
+                var requestMessage = new HttpRequestMessage(HttpMethod.Post, fullUrl);
+                requestMessage.Headers.Add("Client-Id", clientId);
+                requestMessage.Headers.Add("Request-Id", requestId);
+                requestMessage.Headers.Add("Request-Timestamp", timestamp);
+                requestMessage.Headers.Add("Signature", $"HMACSHA256={finalSignature}");
 
-                httpRequest.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
-                httpRequest.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                requestMessage.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
-                var response = await _httpClient.SendAsync(httpRequest);
-                var responseBody = await response.Content.ReadAsStringAsync();
+                var response = await _httpClient.SendAsync(requestMessage);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                _logger.LogInformation("Response Status: {StatusCode}", response.StatusCode);
+                _logger.LogInformation("Response Body: {Body}", responseContent);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogError("Gagal membuat pembayaran DOKU. Status: {StatusCode}, Body: {ResponseBody}", response.StatusCode, responseBody);
-                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"Gagal membuat pembayaran: {responseBody}" };
+                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = responseContent };
                 }
 
-                var dokuResponse = JsonConvert.DeserializeObject<dynamic>(responseBody);
-                string? paymentUrl = dokuResponse?.response?.payment?.url ?? dokuResponse?.payment?.url ?? dokuResponse?.url ?? dokuResponse?.checkout_url ?? dokuResponse?.payment_url;
+                var result = JsonConvert.DeserializeObject<dynamic>(responseContent);
+                string? paymentUrl = result?.response?.payment?.url ?? result?.payment?.url ?? result?.url;
 
                 if (!string.IsNullOrEmpty(paymentUrl))
                 {
                     return new DokuPaymentResponse { IsSuccess = true, PaymentUrl = paymentUrl };
                 }
 
-                _logger.LogError("Gagal mem-parsing URL pembayaran dari respons DOKU: {ResponseBody}", responseBody);
-                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Gagal mendapatkan URL pembayaran dari respons DOKU." };
+                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "URL pembayaran tidak ditemukan dalam respons." };
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unexpected error saat membuat pembayaran DOKU");
-                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"Terjadi kesalahan: {ex.Message}" };
+                _logger.LogError(ex, "Error saat mengirim request ke DOKU");
+                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = ex.Message };
             }
         }
     }
