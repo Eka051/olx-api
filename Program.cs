@@ -23,6 +23,7 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
 builder.Services.AddSignalR();
+builder.Services.AddHttpClient<IMidtransService, MidtransService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddLogging();
 
@@ -87,7 +88,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 builder.Services.AddScoped<IEmailHelper, EmailHelper>();
 builder.Services.AddScoped<JwtHelper>();
-builder.Services.AddScoped<IDokuService, DokuService>();
+builder.Services.AddScoped<IMidtransService, MidtransService>();
 builder.Services.AddScoped<IStorageService, SupabaseStorageService>();
 
 FirebaseAppHelper.Initialize();

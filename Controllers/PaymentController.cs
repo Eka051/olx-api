@@ -15,12 +15,12 @@ namespace olx_be_api.Controllers
     public class PaymentController : ControllerBase
     {
         private readonly AppDbContext _context;
-        private readonly IDokuService _dokuService;
+        private readonly IMidtransService _midtransService;
 
-        public PaymentController(AppDbContext context, IDokuService dokuService)
+        public PaymentController(AppDbContext context, IMidtransService midtransService)
         {
             _context = context;
-            _dokuService = dokuService;
+            _midtransService = midtransService;
         }
 
         [HttpPost("premium-subscriptions/{id}/checkout")]
@@ -52,32 +52,33 @@ namespace olx_be_api.Controllers
                 Status = TransactionStatus.Pending,
                 Type = TransactionType.PremiumSubscription,
                 ReferenceId = package.Id.ToString()
-            };
-
-            var dokuRequest = new DokuPaymentRequest
+            };            var midtransRequest = new MidtransRequest
             {
                 InvoiceNumber = transaction.InvoiceNumber,
                 Amount = transaction.Amount,
-                CustomerName = user.Name ?? "Pengguna OLX",
-                CustomerEmail = user.Email!,
-                LineItems = new List<DokuLineItem>
+                CustomerDetails = new CustomerDetails
                 {
-                    new DokuLineItem { Name = package.Description ?? $"Premium {package.DurationDays} Hari", Price = package.Price, Quantity = 1 }
+                    FirstName = user.Name ?? "Pengguna OLX",
+                    Email = user.Email!
+                },
+                ItemDetails = new List<ItemDetails>
+                {
+                    new ItemDetails { Id = package.Id.ToString(), Name = package.Description ?? $"Premium {package.DurationDays} Hari", Price = package.Price, Quantity = 1 }
                 }
             };
 
-            var dokuResponse = await _dokuService.CreatePayment(dokuRequest);
-            if (!dokuResponse.IsSuccess)
+            var midtransResponse = await _midtransService.CreateSnapTransaction(midtransRequest);
+            if (!midtransResponse.IsSuccess)
             {
-                return StatusCode(500, new ApiErrorResponse { message = dokuResponse.ErrorMessage! });
+                return StatusCode(500, new ApiErrorResponse { message = midtransResponse.ErrorMessage! });
             }
 
-            transaction.PaymentUrl = dokuResponse.PaymentUrl;
+            transaction.PaymentUrl = midtransResponse.RedirectUrl;
             _context.Transactions.Add(transaction);
             await _context.SaveChangesAsync();
 
             return CreatedAtAction(nameof(GetPaymentByInvoice), new { invoiceNumber = transaction.InvoiceNumber },
-                new ApiResponse<string> { success = true, message = "URL pembayaran berhasil dibuat", data = dokuResponse.PaymentUrl });
+                new ApiResponse<string> { success = true, message = "URL pembayaran berhasil dibuat", data = midtransResponse.RedirectUrl });
         }
 
         [HttpPost("cart/checkout")]
@@ -104,12 +105,11 @@ namespace olx_be_api.Controllers
             if (!cartItems.Any())
             {
                 return NotFound(new ApiErrorResponse { success = false, message = "Keranjang Anda kosong." });
-            }
+            }            int totalAmount = cartItems.Sum(item => item.AdPackage.Price * item.Quantity);
 
-            int totalAmount = cartItems.Sum(item => item.AdPackage.Price * item.Quantity);
-
-            var lineItems = cartItems.Select(item => new DokuLineItem
+            var itemDetails = cartItems.Select(item => new ItemDetails
             {
+                Id = item.AdPackageId.ToString(),
                 Name = $"Iklan '{item.AdPackage.Name}' untuk '{item.Product.Title}'",
                 Price = item.AdPackage.Price,
                 Quantity = item.Quantity
@@ -134,22 +134,25 @@ namespace olx_be_api.Controllers
                 Details = JsonSerializer.Serialize(transactionDetails)
             };
 
-            var dokuRequest = new DokuPaymentRequest
+            var midtransRequest = new MidtransRequest
             {
                 InvoiceNumber = transaction.InvoiceNumber,
                 Amount = totalAmount,
-                CustomerName = user.Name ?? "Pengguna OLX",
-                CustomerEmail = user.Email!,
-                LineItems = lineItems
+                CustomerDetails = new CustomerDetails
+                {
+                    FirstName = user.Name ?? "Pengguna OLX",
+                    Email = user.Email!
+                },
+                ItemDetails = itemDetails
             };
 
-            var dokuResponse = await _dokuService.CreatePayment(dokuRequest);
-            if (!dokuResponse.IsSuccess)
+            var midtransResponse = await _midtransService.CreateSnapTransaction(midtransRequest);
+            if (!midtransResponse.IsSuccess)
             {
-                return StatusCode(500, new ApiErrorResponse { message = dokuResponse.ErrorMessage! });
+                return StatusCode(500, new ApiErrorResponse { message = midtransResponse.ErrorMessage! });
             }
 
-            transaction.PaymentUrl = dokuResponse.PaymentUrl;
+            transaction.PaymentUrl = midtransResponse.RedirectUrl;
             _context.Transactions.Add(transaction);
             await _context.SaveChangesAsync();
 
@@ -157,29 +160,25 @@ namespace olx_be_api.Controllers
             await _context.SaveChangesAsync();
 
             return CreatedAtAction(nameof(GetPaymentByInvoice), new { invoiceNumber = transaction.InvoiceNumber },
-                new ApiResponse<string> { success = true, message = "URL pembayaran berhasil dibuat", data = dokuResponse.PaymentUrl });
-        }
-
-        [HttpPost("webhooks/doku")]
+                new ApiResponse<string> { success = true, message = "URL pembayaran berhasil dibuat", data = midtransResponse.RedirectUrl });
+        }        
+        
+        [HttpPost("webhooks/midtrans")]
         [AllowAnonymous]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> DokuNotification()
+        public async Task<IActionResult> MidtransNotification()
         {
             using var reader = new StreamReader(Request.Body);
             var requestBody = await reader.ReadToEndAsync();
-            var notification = JsonSerializer.Deserialize<JsonElement>(requestBody);
-
-            var transactionStatus = notification.GetProperty("transaction").GetProperty("status").GetString();
-            var invoiceNumber = notification.GetProperty("order").GetProperty("invoice_number").GetString();
-
-            var transaction = await _context.Transactions
+            var notification = JsonSerializer.Deserialize<JsonElement>(requestBody);            var transactionStatus = notification.GetProperty("transaction_status").GetString();
+            var orderId = notification.GetProperty("order_id").GetString();            var transaction = await _context.Transactions
                 .Include(t => t.User)
-                .FirstOrDefaultAsync(t => t.InvoiceNumber == invoiceNumber);
+                .FirstOrDefaultAsync(t => t.InvoiceNumber == orderId);
 
             if (transaction != null && transaction.Status == TransactionStatus.Pending)
             {
-                if (transactionStatus == "SUCCESS")
+                if (transactionStatus == "settlement" || transactionStatus == "capture")
                 {
                     transaction.Status = TransactionStatus.Success;
                     transaction.PaidAt = DateTime.UtcNow;
@@ -305,6 +304,28 @@ namespace olx_be_api.Controllers
                 success = true,
                 message = "Transaksi berhasil ditemukan",
                 data = transaction
+            });
+        }
+
+        [HttpGet("midtrans/config")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status500InternalServerError)]
+        public IActionResult GetMidtransConfig()
+        {
+            var config = _midtransService.GetConfig();
+            return Ok(new ApiResponse<object> 
+            { 
+                success = true, 
+                message = "Midtrans configuration retrieved", 
+                data = new 
+                { 
+                    clientKey = config.ClientKey,
+                    isProduction = config.IsProduction,
+                    snapUrl = config.IsProduction 
+                        ? "https://app.midtrans.com/snap/snap.js" 
+                        : "https://app.sandbox.midtrans.com/snap/snap.js"
+                }
             });
         }
     }
