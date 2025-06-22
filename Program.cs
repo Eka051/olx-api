@@ -146,7 +146,6 @@ app.UseSwaggerUI(c =>
 
 app.MapControllers();
 app.MapHub<ChatHub>("/chathub");
-app.MapGet("/health", () => "OK");
 
 if (app.Environment.IsDevelopment())
 {
