@@ -1,13 +1,7 @@
-﻿using System;
-using System.IO;
-using System.Net.Http;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
-
+using System.Text.Json.Serialization;
 namespace olx_be_api.Services
 {
     public class DokuService : IDokuService
@@ -25,8 +19,10 @@ namespace olx_be_api.Services
             _jsonOptions = new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                WriteIndented = false
+                WriteIndented = false,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
             };
+
         }
 
         public async Task<DokuPaymentResponse> CreatePayment(DokuPaymentRequest request)
@@ -69,17 +65,8 @@ namespace olx_be_api.Services
                 }
             };
 
-            _logger.LogInformation("Payload.Order.Amount: {0}", payload.Order.Amount);
-            _logger.LogInformation("Payload.Order.InvoiceNumber: {0}", payload.Order.InvoiceNumber);
-            _logger.LogInformation("Payload.Order.LineItems.Count: {0}", payload.Order.LineItems?.Count ?? 0);
-            foreach (var item in payload.Order.LineItems!)
-            {
-                _logger.LogInformation("Item: Name={0}, Qty={1}, Price={2}", item.Name, item.Quantity, item.Price);
-            }
-
             var requestJson = JsonSerializer.Serialize(payload, _jsonOptions);
             _logger.LogInformation("FINAL JSON sebelum dikirim ke DOKU:\n{0}", requestJson);
-            await File.WriteAllTextAsync("doku_request_debug.json", requestJson);
 
             string digestValue;
             using (var sha256 = SHA256.Create())
@@ -107,41 +94,19 @@ namespace olx_be_api.Services
 
             _logger.LogInformation("Digest Header: {0}", digestHeader);
             _logger.LogInformation("Signature Header: {0}", signatureHeader);
-            _logger.LogInformation("StringToSign:\n{0}", stringToSign);
 
             try
             {
                 var requestMessage = new HttpRequestMessage(HttpMethod.Post, fullUrl);
-
-                // Set headers according to DOKU documentation
                 requestMessage.Headers.Add("Client-Id", clientId);
                 requestMessage.Headers.Add("Request-Id", requestId);
                 requestMessage.Headers.Add("Request-Timestamp", requestTimestamp);
                 requestMessage.Headers.Add("Digest", digestHeader);
                 requestMessage.Headers.Add("Signature", signatureHeader);
-
-                // Set content
                 requestMessage.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
-
-                // Debug log all headers
-                _logger.LogInformation("Request Headers:");
-                foreach (var header in requestMessage.Headers)
-                {
-                    _logger.LogInformation("  {0}: {1}", header.Key, string.Join(", ", header.Value));
-                }
-                if (requestMessage.Content?.Headers != null)
-                {
-                    foreach (var header in requestMessage.Content.Headers)
-                    {
-                        _logger.LogInformation("  {0}: {1}", header.Key, string.Join(", ", header.Value));
-                    }
-                }
 
                 var response = await _httpClient.SendAsync(requestMessage);
                 var responseBody = await response.Content.ReadAsStringAsync();
-
-                _logger.LogInformation("Response Status: {0}", response.StatusCode);
-                _logger.LogInformation("Response Body: {0}", responseBody);
 
                 if (!response.IsSuccessStatusCode)
                 {
