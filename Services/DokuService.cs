@@ -34,12 +34,11 @@ namespace olx_be_api.Services
 
             if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(secretKey) || string.IsNullOrEmpty(apiBaseUrl) || string.IsNullOrEmpty(callbackUrl))
             {
-                _logger.LogError("Konfigurasi DOKU (ClientId, SecretKey, ApiUrl, atau CallbackUrl) tidak lengkap.");
                 return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Konfigurasi DOKU tidak lengkap." };
             }
 
             var requestId = Guid.NewGuid().ToString();
-            var requestTimestamp = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
+            var requestTimestamp = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'");
             var requestPath = "/checkout/v1/payment";
             var fullUrl = apiBaseUrl.TrimEnd('/') + requestPath;
 
@@ -122,7 +121,6 @@ namespace olx_be_api.Services
 
                 if (string.IsNullOrEmpty(paymentUrl))
                 {
-                    _logger.LogError("Gagal mendapatkan URL pembayaran dari respons DOKU: {ResponseBody}", responseBody);
                     return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Gagal mendapatkan URL pembayaran dari respons DOKU." };
                 }
 
