@@ -152,6 +152,7 @@ namespace olx_be_api.Controllers
             transaction.PaymentUrl = dokuResponse.PaymentUrl;
             _context.Transactions.Add(transaction);
             await _context.SaveChangesAsync();
+
             _context.CartItems.RemoveRange(cartItems);
             await _context.SaveChangesAsync();
 
@@ -160,6 +161,7 @@ namespace olx_be_api.Controllers
         }
 
         [HttpPost("webhooks/doku")]
+        [AllowAnonymous]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> DokuNotification()
@@ -184,7 +186,7 @@ namespace olx_be_api.Controllers
 
                     if (transaction.Type == TransactionType.PremiumSubscription)
                     {
-                        var package = await _context.PremiumPackages.FindAsync(int.Parse(transaction.ReferenceId));
+                        var package = await _context.PremiumPackages.FindAsync(int.Parse(transaction.ReferenceId!));
                         if (package != null)
                         {
                             var user = transaction.User;
@@ -225,13 +227,13 @@ namespace olx_be_api.Controllers
 
                                         if (existingFeature != null)
                                         {
-                                            if (existingFeature.ExpiryDate.HasValue)
+                                            if (feature.FeatureType == AdFeatureType.Highlight || feature.FeatureType == AdFeatureType.Spotlight)
                                             {
-                                                existingFeature.ExpiryDate = existingFeature.ExpiryDate > DateTime.UtcNow
+                                                existingFeature.ExpiryDate = (existingFeature.ExpiryDate.HasValue && existingFeature.ExpiryDate > DateTime.UtcNow)
                                                     ? existingFeature.ExpiryDate.Value.AddDays(feature.DurationDays)
                                                     : DateTime.UtcNow.AddDays(feature.DurationDays);
                                             }
-                                            if (feature.FeatureType == AdFeatureType.Sundul)
+                                            else if (feature.FeatureType == AdFeatureType.Sundul)
                                             {
                                                 existingFeature.RemainingQuantity += feature.Quantity;
                                             }
