@@ -65,6 +65,7 @@ namespace olx_be_api.Services
 
             var requestJson = JsonConvert.SerializeObject(payload, jsonSettings);
 
+            // Clean up JSON formatting issues
             const string malformedPattern = "\";:";
             const string correctPattern = "\":";
             if (requestJson.Contains(malformedPattern))
@@ -72,20 +73,22 @@ namespace olx_be_api.Services
                 requestJson = requestJson.Replace(malformedPattern, correctPattern);
             }
 
-            string digest;
+            string digestValue;
             using (var sha256 = SHA256.Create())
             {
                 var requestBodyBytes = Encoding.UTF8.GetBytes(requestJson);
                 var hashBytes = sha256.ComputeHash(requestBodyBytes);
-                digest = Convert.ToBase64String(hashBytes);
+                digestValue = Convert.ToBase64String(hashBytes);
             }
-            var digestHeader = $"SHA-256={digest}";
+            var digestHeader = $"SHA-256={digestValue}";
 
             var stringToSign = $"Client-Id:{clientId}\n" +
                                $"Request-Id:{requestId}\n" +
                                $"Request-Timestamp:{requestTimestamp}\n" +
                                $"Request-Target:{requestPath}\n" +
                                $"Digest:{digestHeader}";
+
+            _logger.LogInformation("String to sign: {StringToSign}", stringToSign);
 
             string signature;
             using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey)))
@@ -106,6 +109,10 @@ namespace olx_be_api.Services
                 requestMessage.Headers.Add("Signature", signatureHeader);
 
                 requestMessage.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+
+                _logger.LogInformation("DOKU Request Headers - Client-Id: {ClientId}, Request-Id: {RequestId}, Request-Timestamp: {RequestTimestamp}, Digest: {Digest}, Signature: {Signature}",
+                    clientId, requestId, requestTimestamp, digestHeader, signatureHeader);
+                _logger.LogInformation("DOKU Request Body: {RequestBody}", requestJson);
 
                 var response = await _httpClient.SendAsync(requestMessage);
                 var responseBody = await response.Content.ReadAsStringAsync();
