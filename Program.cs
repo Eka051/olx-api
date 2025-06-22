@@ -1,4 +1,4 @@
-using API_Manajemen_Barang.Middleware;
+using olx_be_api.Middleware;
 using FirebaseAdmin;
 using Google.Apis.Auth.OAuth2;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
