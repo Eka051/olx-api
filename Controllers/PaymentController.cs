@@ -44,6 +44,17 @@ namespace olx_be_api.Controllers
                 return NotFound(new ApiErrorResponse { success = false, message = "Paket Premium tidak ditemukan" });
             }
 
+            var transactionDetails = new List<TransactionItemDetail>
+            {
+                new TransactionItemDetail
+                {
+                    AdPackageId = 0,  
+                    ProductId = 0, 
+                    Price = package.Price,
+                    Quantity = 1
+                }
+            };
+
             var transaction = new Transaction
             {
                 UserId = userId,
@@ -51,8 +62,11 @@ namespace olx_be_api.Controllers
                 Amount = package.Price,
                 Status = TransactionStatus.Pending,
                 Type = TransactionType.PremiumSubscription,
-                ReferenceId = package.Id.ToString()
-            };            var midtransRequest = new MidtransRequest
+                ReferenceId = package.Id.ToString(),
+                Details = JsonSerializer.Serialize(transactionDetails)
+            };
+
+            var midtransRequest = new MidtransRequest
             {
                 InvoiceNumber = transaction.InvoiceNumber,
                 Amount = transaction.Amount,
@@ -63,7 +77,13 @@ namespace olx_be_api.Controllers
                 },
                 ItemDetails = new List<ItemDetails>
                 {
-                    new ItemDetails { Id = package.Id.ToString(), Name = package.Description ?? $"Premium {package.DurationDays} Hari", Price = package.Price, Quantity = 1 }
+                    new ItemDetails
+                    {
+                        Id = package.Id.ToString(),
+                        Name = package.Description ?? $"Premium {package.DurationDays} Hari",
+                        Price = package.Price,
+                        Quantity = 1
+                    }
                 }
             };
 
@@ -77,8 +97,16 @@ namespace olx_be_api.Controllers
             _context.Transactions.Add(transaction);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetPaymentByInvoice), new { invoiceNumber = transaction.InvoiceNumber },
-                new ApiResponse<string> { success = true, message = "URL pembayaran berhasil dibuat", data = midtransResponse.RedirectUrl });
+            return CreatedAtAction(
+                nameof(GetPaymentByInvoice),
+                new { invoiceNumber = transaction.InvoiceNumber },
+                new ApiResponse<string>
+                {
+                    success = true,
+                    message = "URL pembayaran berhasil dibuat",
+                    data = midtransResponse.RedirectUrl
+                }
+            );
         }
 
         [HttpPost("cart/checkout")]
@@ -105,7 +133,8 @@ namespace olx_be_api.Controllers
             if (!cartItems.Any())
             {
                 return NotFound(new ApiErrorResponse { success = false, message = "Keranjang Anda kosong." });
-            }            int totalAmount = cartItems.Sum(item => item.AdPackage.Price * item.Quantity);
+            }
+            int totalAmount = cartItems.Sum(item => item.AdPackage.Price * item.Quantity);
 
             var itemDetails = cartItems.Select(item => new ItemDetails
             {
@@ -161,8 +190,8 @@ namespace olx_be_api.Controllers
 
             return CreatedAtAction(nameof(GetPaymentByInvoice), new { invoiceNumber = transaction.InvoiceNumber },
                 new ApiResponse<string> { success = true, message = "URL pembayaran berhasil dibuat", data = midtransResponse.RedirectUrl });
-        }        
-        
+        }
+
         [HttpPost("webhooks/midtrans")]
         [AllowAnonymous]
         [ProducesResponseType(StatusCodes.Status200OK)]
@@ -171,8 +200,8 @@ namespace olx_be_api.Controllers
         {
             using var reader = new StreamReader(Request.Body);
             var requestBody = await reader.ReadToEndAsync();
-            var notification = JsonSerializer.Deserialize<JsonElement>(requestBody);            var transactionStatus = notification.GetProperty("transaction_status").GetString();
-            var orderId = notification.GetProperty("order_id").GetString();            var transaction = await _context.Transactions
+            var notification = JsonSerializer.Deserialize<JsonElement>(requestBody); var transactionStatus = notification.GetProperty("transaction_status").GetString();
+            var orderId = notification.GetProperty("order_id").GetString(); var transaction = await _context.Transactions
                 .Include(t => t.User)
                 .FirstOrDefaultAsync(t => t.InvoiceNumber == orderId);
 
@@ -275,7 +304,7 @@ namespace olx_be_api.Controllers
                 await _context.SaveChangesAsync();
             }
 
-            return Ok();
+            return Ok(new { success = true, message = "Notification received" });
         }
 
         [HttpGet("{invoiceNumber}")]
@@ -314,16 +343,16 @@ namespace olx_be_api.Controllers
         public IActionResult GetMidtransConfig()
         {
             var config = _midtransService.GetConfig();
-            return Ok(new ApiResponse<object> 
-            { 
-                success = true, 
-                message = "Midtrans configuration retrieved", 
-                data = new 
-                { 
+            return Ok(new ApiResponse<object>
+            {
+                success = true,
+                message = "Midtrans configuration retrieved",
+                data = new
+                {
                     clientKey = config.ClientKey,
                     isProduction = config.IsProduction,
-                    snapUrl = config.IsProduction 
-                        ? "https://app.midtrans.com/snap/snap.js" 
+                    snapUrl = config.IsProduction
+                        ? "https://app.midtrans.com/snap/snap.js"
                         : "https://app.sandbox.midtrans.com/snap/snap.js"
                 }
             });

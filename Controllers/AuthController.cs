@@ -107,10 +107,30 @@ namespace olx_be_api.Controllers
                 else
                 {
                     bool needsUpdate = false;
-                    if (user.Name != firebaseUser.DisplayName) { user.Name = firebaseUser.DisplayName; needsUpdate = true; }
-                    if (user.Email != firebaseUser.Email) { user.Email = firebaseUser.Email; needsUpdate = true; }
-                    if (user.PhoneNumber != firebaseUser.PhoneNumber) { user.PhoneNumber = firebaseUser.PhoneNumber; needsUpdate = true; }
-                    if (user.ProfilePictureUrl != firebaseUser.PhotoUrl) { user.ProfilePictureUrl = firebaseUser.PhotoUrl; needsUpdate = true; }
+
+                    if (string.IsNullOrEmpty(user.Name) && !string.IsNullOrEmpty(firebaseUser.DisplayName))
+                    {
+                        user.Name = firebaseUser.DisplayName;
+                        needsUpdate = true;
+                    }
+
+                    if (string.IsNullOrEmpty(user.PhoneNumber) && !string.IsNullOrEmpty(firebaseUser.PhoneNumber))
+                    {
+                        user.PhoneNumber = firebaseUser.PhoneNumber;
+                        needsUpdate = true;
+                    }
+
+                    if (string.IsNullOrEmpty(user.ProfilePictureUrl) && !string.IsNullOrEmpty(firebaseUser.PhotoUrl))
+                    {
+                        user.ProfilePictureUrl = firebaseUser.PhotoUrl;
+                        needsUpdate = true;
+                    }
+
+                    if (user.Email != firebaseUser.Email)
+                    {
+                        user.Email = firebaseUser.Email;
+                        needsUpdate = true;
+                    }
 
                     if (needsUpdate)
                     {
@@ -164,12 +184,7 @@ namespace olx_be_api.Controllers
         {
             if (!ModelState.IsValid)
             {
-                return BadRequest(new ApiErrorResponse
-                {
-                    success = false,
-                    message = "Permintaan tidak valid",
-                    errors = ModelState
-                });
+                return BadRequest(new ApiErrorResponse { success = false, message = "Permintaan tidak valid", errors = ModelState });
             }
 
             var recentOtp = await _context.EmailOtps
@@ -178,18 +193,19 @@ namespace olx_be_api.Controllers
 
             if (recentOtp != null)
             {
-                return StatusCode(StatusCodes.Status429TooManyRequests,
-
-                    new ApiErrorResponse
-                    {
-                        success = false,
-                        message = "Anda sudah mengirimkan kode OTP dalam 1 menit terakhir. Silakan tunggu sebelum mencoba lagi."
-                    });
+                return StatusCode(StatusCodes.Status429TooManyRequests, new ApiErrorResponse { success = false, message = "Anda baru saja meminta kode OTP. Silakan tunggu 1 menit sebelum mencoba lagi." });
             }
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email && u.AuthProvider == "email");
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
 
-            if (user == null)
+            if (user != null)
+            {
+                if (user.AuthProvider != "email")
+                {
+                    return BadRequest(new ApiErrorResponse { success = false, message = "Email ini terdaftar dengan metode login lain (misal: Google). Silakan login menggunakan metode tersebut." });
+                }
+            }
+            else
             {
                 var userRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "User");
                 if (userRole == null)
@@ -209,14 +225,15 @@ namespace olx_be_api.Controllers
 
                 _context.Users.Add(user);
                 _context.UserRoles.Add(new UserRole { User = user, Role = userRole });
-
             }
 
             var existingOTPs = _context.EmailOtps.Where(o => o.UserId == user.Id && !o.IsUsed && o.ExpiredAt > DateTime.UtcNow);
             if (existingOTPs.Any())
             {
                 _context.EmailOtps.RemoveRange(existingOTPs);
-            }            var otpCode = new Random().Next(100000, 999999).ToString();
+            }
+
+            var otpCode = new Random().Next(100000, 999999).ToString();
             var otpExpiration = DateTime.UtcNow.AddMinutes(10);
 
             var emailOtp = new EmailOtp
@@ -229,10 +246,11 @@ namespace olx_be_api.Controllers
                 IsUsed = false
             };
             _context.EmailOtps.Add(emailOtp);
-            await _context.SaveChangesAsync();
 
             try
             {
+                await _context.SaveChangesAsync();
+
                 string emailSubject = "Kode Verifikasi Akun OLX";
                 string emailMessage = $@"
                 <html>
@@ -255,14 +273,12 @@ namespace olx_be_api.Controllers
             }
             catch (Exception ex)
             {
-                _context.EmailOtps.Remove(emailOtp);
-                await _context.SaveChangesAsync();
                 return StatusCode(StatusCodes.Status500InternalServerError,
                     new ApiErrorResponse
                     {
                         success = false,
-                        message = "Gagal mengirim email OTP",
-                        errors = new { email = ex.Message }
+                        message = "Gagal memproses permintaan OTP.",
+                        errors = new { error = ex.Message }
                     });
             }
         }
