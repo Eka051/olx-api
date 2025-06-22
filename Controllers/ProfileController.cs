@@ -60,7 +60,7 @@ namespace olx_be_api.Controllers
         }
 
         [HttpPut("me")]
-        [ProducesResponseType(typeof(ApiResponse<string>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<UserProfileDTO>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status500InternalServerError)]
@@ -72,7 +72,9 @@ namespace olx_be_api.Controllers
             }
 
             var userId = User.GetUserId();
-            var user = await _context.Users.FindAsync(userId);
+            var user = await _context.Users
+                .Include(u => u.Products)
+                .FirstOrDefaultAsync(u => u.Id == userId);
 
             if (user == null)
             {
@@ -105,13 +107,28 @@ namespace olx_be_api.Controllers
             }
 
             user.Name = profileDto.Name ?? user.Name;
-            user.Email = profileDto.Email ?? user.Email;
             user.PhoneNumber = profileDto.PhoneNumber ?? user.PhoneNumber;
 
             _context.Users.Update(user);
             await _context.SaveChangesAsync();
 
-            return Ok(new ApiResponse<string> { success = true, message = "Foto profil berhasil diperbarui" });
+            var userProfileDto = new UserProfileDTO
+            {
+                Id = user.Id,
+                Name = user.Name,
+                Email = user.Email,
+                PhoneNumber = user.PhoneNumber,
+                ProfilePictureUrl = user.ProfilePictureUrl,
+                ProfileType = user.ProfileType,
+                CreatedAt = user.CreatedAt,
+                TotalAds = user.Products.Count
+            };
+
+            return Ok(new ApiResponse<UserProfileDTO> { 
+                success = true, 
+                message = "Data akun berhasil diperbarui", 
+                data = userProfileDto 
+            });
         }
     }
 }
