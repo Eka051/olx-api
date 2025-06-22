@@ -27,12 +27,13 @@ namespace olx_be_api.Services
         public async Task<DokuPaymentResponse> CreatePayment(DokuPaymentRequest request)
         {
             var dokuConfig = _configuration.GetSection("DokuSettings");
-            var clientId = dokuConfig["ClientId"];
-            var secretKey = dokuConfig["SecretKey"];
-            var apiBaseUrl = dokuConfig["ApiUrl"];
+            var clientId = dokuConfig["ClientId"]?.Trim();
+            var secretKey = dokuConfig["SecretKey"]?.Trim();
+            var apiBaseUrl = dokuConfig["ApiUrl"]?.TrimEnd('/');
             var callbackUrl = dokuConfig["CallbackUrl"]?.Trim();
 
-            if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(secretKey) || string.IsNullOrEmpty(apiBaseUrl) || string.IsNullOrEmpty(callbackUrl))
+            if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(secretKey) ||
+                string.IsNullOrEmpty(apiBaseUrl) || string.IsNullOrEmpty(callbackUrl))
             {
                 _logger.LogError("Konfigurasi DOKU tidak lengkap.");
                 return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Konfigurasi DOKU tidak lengkap." };
@@ -41,7 +42,7 @@ namespace olx_be_api.Services
             var requestId = Guid.NewGuid().ToString();
             var requestTimestamp = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'");
             var requestPath = "/checkout/v1/payment";
-            var fullUrl = apiBaseUrl.TrimEnd('/') + requestPath;
+            var fullUrl = apiBaseUrl + requestPath;
 
             var payload = new DokuRequestPayload
             {
@@ -76,7 +77,6 @@ namespace olx_be_api.Services
                 return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = ex.Message };
             }
 
-            // Generate digest
             string digestValue;
             using (var sha256 = SHA256.Create())
             {
@@ -90,18 +90,20 @@ namespace olx_be_api.Services
                                $"Request-Target:{requestPath}\n" +
                                $"Digest:{digestHeader}";
 
-            // Generate signature
+            _logger.LogInformation("StringToSign:\n{0}", stringToSign);
+
             string signature;
             using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey)))
             {
                 signature = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(stringToSign)));
             }
 
-            string signatureHeader = $"Client-Id=\"{clientId}\",Request-Id=\"{requestId}\",Request-Timestamp=\"{requestTimestamp}\",Request-Target=\"{requestPath}\",Digest=\"{digestHeader}\",Signature=\"{signature}\"";
+            string signatureHeader =
+                $"Client-Id=\"{clientId}\",Request-Id=\"{requestId}\",Request-Timestamp=\"{requestTimestamp}\"," +
+                $"Request-Target=\"{requestPath}\",Digest=\"{digestHeader}\",Signature=\"{signature}\"";
 
             _logger.LogInformation("Digest Header: {0}", digestHeader);
             _logger.LogInformation("Signature Header: {0}", signatureHeader);
-            _logger.LogInformation("StringToSign:\n{0}", stringToSign);
 
             try
             {
@@ -123,7 +125,8 @@ namespace olx_be_api.Services
                 }
 
                 using var responseDoc = JsonDocument.Parse(responseBody);
-                var paymentUrl = responseDoc.RootElement.GetProperty("response").GetProperty("payment").GetProperty("url").GetString();
+                var paymentUrl = responseDoc.RootElement.GetProperty("response")
+                                    .GetProperty("payment").GetProperty("url").GetString();
 
                 if (string.IsNullOrEmpty(paymentUrl))
                 {
