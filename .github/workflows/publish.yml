@@ -1,36 +1,31 @@
-name: Build, publish and deploy to MonsterASP.NET
-on: [push]
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
 jobs:
-  build_and_deploy:
-    runs-on: windows-latest
+  build:
+    runs-on: ubuntu-latest 
+    
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0
-          
-      - name: Install dependencies
-        run: dotnet restore
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET 9.0
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
         
-      - name: Test with .NET
-        run: dotnet test --no-restore
-        
-      - name: Publish
-        run: dotnet publish --configuration Release --output publish --runtime win-x86 --self-contained false --no-restore
-        
-      - name: List files (debug)
-        run: |
-          echo "Current directory:"
-          dir
-          echo "Publish folder contents:"
-          dir publish
-        
-      - name: Deploy to MonsterASP.NET via WebDeploy
-        uses: rasmusbuchholdt/simply-web-deploy@2.1.0
-        with:
-          website-name: ${{ secrets.WEBSITE_NAME }}
-          server-computer-name: ${{ secrets.SERVER_COMPUTER_NAME }}
-          server-username: ${{ secrets.SERVER_USERNAME }}
-          server-password: ${{ secrets.SERVER_PASSWORD }}
-          source-path: 'publish'
+    - name: Restore dependencies
+      run: dotnet restore olx-api.csproj
+      
+    - name: Build
+      run: dotnet build olx-api.csproj --configuration Release --no-restore
+      
+    - name: Test (if you have tests)
+      run: dotnet test --no-build --verbosity normal --collect:"XPlat Code Coverage"
+      
+    - name: Publish
+      run: dotnet publish olx-api.csproj --configuration Release --output ./publish --no-restore
