@@ -49,6 +49,18 @@ namespace olx_be_api.Services
                 return new MidtransResponse { IsSuccess = false, ErrorMessage = "Konfigurasi Midtrans tidak lengkap." };
             }
 
+            if (!apiUrl.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("ApiUrl Midtrans terdeteksi memiliki format tidak standar: {OriginalUrl}", apiUrl);
+                int httpIndex = apiUrl.IndexOf("http");
+                if (httpIndex > -1)
+                {
+                    apiUrl = apiUrl.Substring(httpIndex);
+                    _logger.LogInformation("ApiUrl Midtrans telah diperbaiki menjadi: {NewUrl}", apiUrl);
+                }
+            }
+
+
             var payload = new
             {
                 transaction_details = new
