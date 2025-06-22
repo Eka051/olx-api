@@ -66,10 +66,11 @@ namespace olx_be_api.Services
 
             var requestJson = JsonConvert.SerializeObject(payload, jsonSettings);
 
-            if (requestJson.Contains(';'))
+            const string malformedPattern = "\";:";
+            const string correctPattern = "\":";
+            if (requestJson.Contains(malformedPattern))
             {
-                _logger.LogCritical("JSON YANG DIHASILKAN TIDAK VALID! Ditemukan titik koma (;) di dalamnya. Body: {RequestBody}", requestJson);
-                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Terjadi error internal saat membuat data request. Ditemukan karakter tidak valid." };
+                requestJson = requestJson.Replace(malformedPattern, correctPattern);
             }
 
             string digest;
@@ -96,14 +97,6 @@ namespace olx_be_api.Services
             }
             var signatureHeader = $"HMACSHA256={signature}";
 
-            _logger.LogInformation("--- DOKU Checkout Signature Generation ---");
-            _logger.LogInformation("Request-Id: {RequestId}", requestId);
-            _logger.LogInformation("Request-Timestamp: {RequestTimestamp}", requestTimestamp);
-            _logger.LogInformation("Minified JSON Body: {RequestBody}", requestJson);
-            _logger.LogInformation("Digest Header: {DigestHeader}", digestHeader);
-            _logger.LogInformation("String-to-Sign:\n{StringToSign}", stringToSign);
-            _logger.LogInformation("Signature Header: {SignatureHeader}", signatureHeader);
-
             try
             {
                 var requestMessage = new HttpRequestMessage(HttpMethod.Post, fullUrl);
@@ -123,8 +116,6 @@ namespace olx_be_api.Services
                     _logger.LogError("Gagal membuat pembayaran DOKU. Status: {StatusCode}, Body: {ResponseBody}", response.StatusCode, responseBody);
                     return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"Error DOKU: {responseBody}" };
                 }
-
-                _logger.LogInformation("Berhasil membuat pembayaran DOKU. Response: {ResponseBody}", responseBody);
 
                 var dokuResponse = JsonConvert.DeserializeObject<dynamic>(responseBody);
                 string paymentUrl = dokuResponse?.response?.payment?.url!;
