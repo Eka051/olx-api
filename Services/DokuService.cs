@@ -61,8 +61,7 @@ namespace olx_be_api.Services
 
             var options = new JsonSerializerOptions
             {
-                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
             };
 
             var requestJson = JsonSerializer.Serialize(payload, options);
@@ -70,7 +69,7 @@ namespace olx_be_api.Services
             var requestBodyBytes = Encoding.UTF8.GetBytes(requestJson);
             using var sha256 = SHA256.Create();
             var hashBytes = sha256.ComputeHash(requestBodyBytes);
-            var digest = "SHA-256=" + Convert.ToBase64String(hashBytes);
+            var digest = Convert.ToBase64String(hashBytes);
 
             var signatureComponent = $"Client-Id:{clientId}\n" +
                                    $"Request-Id:{requestId}\n" +
@@ -100,8 +99,6 @@ namespace olx_be_api.Services
                 httpRequest.Headers.Add("Client-Id", clientId);
                 httpRequest.Headers.Add("Request-Id", requestId);
                 httpRequest.Headers.Add("Request-Timestamp", requestTimestamp);
-                httpRequest.Headers.Add("Request-Target", requestPath);
-                httpRequest.Headers.Add("Digest", digest);
                 httpRequest.Headers.Add("Signature", $"HMACSHA256={signature}");
 
                 httpRequest.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
