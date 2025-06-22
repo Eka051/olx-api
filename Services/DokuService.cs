@@ -27,11 +27,7 @@ namespace olx_be_api.Services
             var apiUrl = dokuConfig["ApiUrl"];
             var callbackUrl = dokuConfig["CallbackUrl"]?.Trim();
 
-            var environment = dokuConfig["Environment"] ?? "sandbox";
-
-            var requestPath = environment.ToLower() == "production"
-                ? "/checkout/v1/payment"
-                : "/checkout/v1/payment";
+            var requestPath = "/checkout/v1/payment";
 
             if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(secretKey) || string.IsNullOrEmpty(apiUrl) || string.IsNullOrEmpty(callbackUrl))
             {
@@ -40,7 +36,7 @@ namespace olx_be_api.Services
             }
 
             var requestId = Guid.NewGuid().ToString();
-            var requestTimestamp = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'"); 
+            var requestTimestamp = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
 
             var payload = new
             {
@@ -50,11 +46,11 @@ namespace olx_be_api.Services
                     invoice_number = request.InvoiceNumber,
                     currency = "IDR",
                     callback_url = callbackUrl,
-                    line_items = request.LineItems,
+                    line_items = request.LineItems
                 },
                 payment = new
                 {
-                    payment_due_date = 60 
+                    payment_due_date = 60
                 },
                 customer = new
                 {
@@ -66,7 +62,7 @@ namespace olx_be_api.Services
             var options = new JsonSerializerOptions
             {
                 DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase 
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             };
 
             var requestJson = JsonSerializer.Serialize(payload, options);
@@ -86,7 +82,6 @@ namespace olx_be_api.Services
             var signature = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(signatureComponent)));
 
             _logger.LogInformation("--- DOKU Payment Creation ---");
-            _logger.LogInformation("Environment: {Environment}", environment);
             _logger.LogInformation("Client-Id: {ClientId}", clientId);
             _logger.LogInformation("Request-Id: {RequestId}", requestId);
             _logger.LogInformation("Request-Timestamp: {RequestTimestamp}", requestTimestamp);
@@ -96,12 +91,11 @@ namespace olx_be_api.Services
             _logger.LogInformation("String-to-Sign: {StringToSign}", signatureComponent.Replace("\n", "\\n"));
             _logger.LogInformation("Signature: {Signature}", signature);
 
-            var fullRequestUrl = apiUrl.TrimEnd('/') + requestPath;
-            _logger.LogInformation("Full Request URL: {FullRequestUrl}", fullRequestUrl);
+            _logger.LogInformation("Full Request URL: {FullRequestUrl}", apiUrl);
 
             try
             {
-                var httpRequest = new HttpRequestMessage(HttpMethod.Post, fullRequestUrl);
+                var httpRequest = new HttpRequestMessage(HttpMethod.Post, apiUrl);
 
                 httpRequest.Headers.Add("Client-Id", clientId);
                 httpRequest.Headers.Add("Request-Id", requestId);
@@ -125,7 +119,6 @@ namespace olx_be_api.Services
                 {
                     _logger.LogError("Gagal membuat pembayaran DOKU. Status: {StatusCode}, Body: {ResponseBody}", response.StatusCode, responseBody);
 
-                    // Berikan pesan error yang lebih spesifik
                     var errorMessage = response.StatusCode switch
                     {
                         System.Net.HttpStatusCode.NotFound => "Endpoint tidak ditemukan (404). Periksa URL API dan path endpoint.",
@@ -146,25 +139,21 @@ namespace olx_be_api.Services
 
                     string? paymentUrl = null;
 
-                    // Struktur 1: response.payment.url
                     if (dokuResponse.TryGetProperty("response", out var responseElement) &&
                         responseElement.TryGetProperty("payment", out var paymentElement) &&
                         paymentElement.TryGetProperty("url", out var urlElement))
                     {
                         paymentUrl = urlElement.GetString();
                     }
-                    // Struktur 2: payment.url
                     else if (dokuResponse.TryGetProperty("payment", out var directPaymentElement) &&
                              directPaymentElement.TryGetProperty("url", out var directUrlElement))
                     {
                         paymentUrl = directUrlElement.GetString();
                     }
-                    // Struktur 3: url langsung
                     else if (dokuResponse.TryGetProperty("url", out var directUrl))
                     {
                         paymentUrl = directUrl.GetString();
                     }
-                    // Struktur 4: checkout_url atau payment_url
                     else if (dokuResponse.TryGetProperty("checkout_url", out var checkoutUrl))
                     {
                         paymentUrl = checkoutUrl.GetString();
