@@ -25,7 +25,8 @@ namespace olx_be_api.Controllers
             _context = context;
             _storageService = storageService;
         }    
-              [HttpGet("me")]
+        
+        [HttpGet("me")]
         [ProducesResponseType(typeof(ApiResponse<UserProfileDTO>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
@@ -50,6 +51,7 @@ namespace olx_be_api.Controllers
                 Email = user.Email,
                 PhoneNumber = user.PhoneNumber,
                 ProfilePictureUrl = user.ProfilePictureUrl,
+                ProfileType = user.ProfileType,
                 CreatedAt = user.CreatedAt,
                 TotalAds = user.Products.Count
             };
