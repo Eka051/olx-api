@@ -22,7 +22,6 @@ namespace olx_be_api.Services
                 WriteIndented = false,
                 DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
             };
-
         }
 
         public async Task<DokuPaymentResponse> CreatePayment(DokuPaymentRequest request)
@@ -65,17 +64,24 @@ namespace olx_be_api.Services
                 }
             };
 
-            var requestJson = JsonSerializer.Serialize(payload, _jsonOptions);
-            _logger.LogInformation("FINAL JSON sebelum dikirim ke DOKU:\n{0}", requestJson);
+            string requestJson;
+            try
+            {
+                requestJson = JsonSerializer.Serialize(payload, _jsonOptions);
+                _logger.LogInformation("FINAL JSON sebelum dikirim ke DOKU:\n{0}", requestJson);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Gagal serialize JSON payload.");
+                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = ex.Message };
+            }
 
             string digestValue;
             using (var sha256 = SHA256.Create())
             {
-                var requestBodyBytes = Encoding.UTF8.GetBytes(requestJson);
-                var hashBytes = sha256.ComputeHash(requestBodyBytes);
-                digestValue = Convert.ToBase64String(hashBytes);
+                digestValue = Convert.ToBase64String(sha256.ComputeHash(Encoding.UTF8.GetBytes(requestJson)));
             }
-            var digestHeader = $"SHA-256={digestValue}";
+            string digestHeader = $"SHA-256={digestValue}";
 
             var stringToSign = $"Client-Id:{clientId}\n" +
                                $"Request-Id:{requestId}\n" +
@@ -86,14 +92,13 @@ namespace olx_be_api.Services
             string signature;
             using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey)))
             {
-                var stringToSignBytes = Encoding.UTF8.GetBytes(stringToSign);
-                var signatureBytes = hmac.ComputeHash(stringToSignBytes);
-                signature = Convert.ToBase64String(signatureBytes);
+                signature = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(stringToSign)));
             }
-            var signatureHeader = $"HMACSHA256={signature}";
+            string signatureHeader = $"HMACSHA256={signature}";
 
             _logger.LogInformation("Digest Header: {0}", digestHeader);
             _logger.LogInformation("Signature Header: {0}", signatureHeader);
+            _logger.LogInformation("StringToSign:\n{0}", stringToSign);
 
             try
             {
@@ -111,27 +116,15 @@ namespace olx_be_api.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError("Gagal membuat pembayaran DOKU. Status: {0}, Body: {1}", response.StatusCode, responseBody);
-                    return new DokuPaymentResponse
-                    {
-                        IsSuccess = false,
-                        ErrorMessage = $"Error DOKU: {responseBody}"
-                    };
+                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"Error DOKU: {responseBody}" };
                 }
 
                 using var responseDoc = JsonDocument.Parse(responseBody);
-                var paymentUrl = responseDoc.RootElement
-                    .GetProperty("response")
-                    .GetProperty("payment")
-                    .GetProperty("url")
-                    .GetString();
+                var paymentUrl = responseDoc.RootElement.GetProperty("response").GetProperty("payment").GetProperty("url").GetString();
 
                 if (string.IsNullOrEmpty(paymentUrl))
                 {
-                    return new DokuPaymentResponse
-                    {
-                        IsSuccess = false,
-                        ErrorMessage = "Gagal mendapatkan URL pembayaran dari respons DOKU."
-                    };
+                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Gagal mendapatkan URL pembayaran dari respons DOKU." };
                 }
 
                 return new DokuPaymentResponse { IsSuccess = true, PaymentUrl = paymentUrl };
@@ -139,11 +132,7 @@ namespace olx_be_api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Terjadi kesalahan saat membuat pembayaran DOKU.");
-                return new DokuPaymentResponse
-                {
-                    IsSuccess = false,
-                    ErrorMessage = $"Terjadi kesalahan sistem: {ex.Message}"
-                };
+                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"Terjadi kesalahan sistem: {ex.Message}" };
             }
         }
     }

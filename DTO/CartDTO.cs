@@ -4,7 +4,6 @@
     {
         public int AdPackageId { get; set; }
         public int Quantity { get; set; }
-        public long ProductId { get; set; }
     }
 
     public class CartResponseDTO
