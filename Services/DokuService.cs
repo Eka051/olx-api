@@ -76,6 +76,7 @@ namespace olx_be_api.Services
                 return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = ex.Message };
             }
 
+            // Generate digest
             string digestValue;
             using (var sha256 = SHA256.Create())
             {
@@ -89,12 +90,14 @@ namespace olx_be_api.Services
                                $"Request-Target:{requestPath}\n" +
                                $"Digest:{digestHeader}";
 
+            // Generate signature
             string signature;
             using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey)))
             {
                 signature = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(stringToSign)));
             }
-            string signatureHeader = $"HMACSHA256={signature}";
+
+            string signatureHeader = $"Client-Id=\"{clientId}\",Request-Id=\"{requestId}\",Request-Timestamp=\"{requestTimestamp}\",Request-Target=\"{requestPath}\",Digest=\"{digestHeader}\",Signature=\"{signature}\"";
 
             _logger.LogInformation("Digest Header: {0}", digestHeader);
             _logger.LogInformation("Signature Header: {0}", signatureHeader);
