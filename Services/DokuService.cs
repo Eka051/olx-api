@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 
 namespace olx_be_api.Services
 {
@@ -46,7 +48,12 @@ namespace olx_be_api.Services
                     invoice_number = request.InvoiceNumber,
                     currency = "IDR",
                     callback_url = callbackUrl,
-                    line_items = request.LineItems
+                    line_items = request.LineItems.Select(item => new
+                    {
+                        name = item.Name,
+                        price = item.Price,
+                        quantity = item.Quantity
+                    })
                 },
                 payment = new
                 {
@@ -59,13 +66,16 @@ namespace olx_be_api.Services
                 }
             };
 
-            var options = new JsonSerializerOptions
+            var jsonSettings = new JsonSerializerSettings
             {
-                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+                ContractResolver = new DefaultContractResolver
+                {
+                    NamingStrategy = new SnakeCaseNamingStrategy()
+                },
+                NullValueHandling = NullValueHandling.Ignore
             };
 
-            var requestJson = JsonSerializer.Serialize(payload, options);
+            var requestJson = JsonConvert.SerializeObject(payload, jsonSettings);
 
             var requestBodyBytes = Encoding.UTF8.GetBytes(requestJson);
             using var sha256 = SHA256.Create();
@@ -82,20 +92,11 @@ namespace olx_be_api.Services
             var signature = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(signatureComponent)));
 
             _logger.LogInformation("--- DOKU Payment Creation ---");
-            _logger.LogInformation("Client-Id: {ClientId}", clientId);
-            _logger.LogInformation("Request-Id: {RequestId}", requestId);
-            _logger.LogInformation("Request-Timestamp: {RequestTimestamp}", requestTimestamp);
-            _logger.LogInformation("Request-Target: {RequestTarget}", requestPath);
             _logger.LogInformation("Request Body (JSON): {RequestBody}", requestJson);
-            _logger.LogInformation("Digest: {Digest}", digest);
-            _logger.LogInformation("String-to-Sign: {StringToSign}", signatureComponent.Replace("\n", "\\n"));
-            _logger.LogInformation("Signature: {Signature}", signature);
-            _logger.LogInformation("Full Request URL: {FullRequestUrl}", apiUrl);
 
             try
             {
-                var httpRequest = new HttpRequestMessage(HttpMethod.Post, apiUrl);
-
+                var httpRequest = new HttpRequestMessage(HttpMethod.Post, apiUrl + requestPath);
                 httpRequest.Headers.Add("Client-Id", clientId);
                 httpRequest.Headers.Add("Request-Id", requestId);
                 httpRequest.Headers.Add("Request-Timestamp", requestTimestamp);
@@ -105,79 +106,25 @@ namespace olx_be_api.Services
                 httpRequest.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
                 httpRequest.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
-                _logger.LogInformation("Sending request to DOKU...");
-
                 var response = await _httpClient.SendAsync(httpRequest);
                 var responseBody = await response.Content.ReadAsStringAsync();
-
-                _logger.LogInformation("DOKU Response Status: {StatusCode}", response.StatusCode);
-                _logger.LogInformation("DOKU Response Body: {ResponseBody}", responseBody);
 
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError("Gagal membuat pembayaran DOKU. Status: {StatusCode}, Body: {ResponseBody}", response.StatusCode, responseBody);
-
-                    var errorMessage = response.StatusCode switch
-                    {
-                        System.Net.HttpStatusCode.NotFound => "Endpoint tidak ditemukan (404). Periksa URL API dan path endpoint.",
-                        System.Net.HttpStatusCode.Unauthorized => "Tidak terotorisasi (401). Periksa Client-Id dan Secret Key.",
-                        System.Net.HttpStatusCode.BadRequest => "Request tidak valid (400). Periksa format payload.",
-                        System.Net.HttpStatusCode.Forbidden => "Akses ditolak (403). Periksa signature dan permissions.",
-                        _ => $"Error {(int)response.StatusCode}: {responseBody}"
-                    };
-
-                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = errorMessage };
+                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"Gagal membuat pembayaran: {responseBody}" };
                 }
 
-                _logger.LogInformation("Berhasil membuat pembayaran DOKU. Response: {ResponseBody}", responseBody);
+                var dokuResponse = JsonConvert.DeserializeObject<dynamic>(responseBody);
+                string? paymentUrl = dokuResponse?.response?.payment?.url ?? dokuResponse?.payment?.url ?? dokuResponse?.url ?? dokuResponse?.checkout_url ?? dokuResponse?.payment_url;
 
-                try
+                if (!string.IsNullOrEmpty(paymentUrl))
                 {
-                    var dokuResponse = JsonSerializer.Deserialize<JsonElement>(responseBody);
-                    string? paymentUrl = null;
-
-                    if (dokuResponse.TryGetProperty("response", out var responseElement) &&
-                        responseElement.TryGetProperty("payment", out var paymentElement) &&
-                        paymentElement.TryGetProperty("url", out var urlElement))
-                    {
-                        paymentUrl = urlElement.GetString();
-                    }
-                    else if (dokuResponse.TryGetProperty("payment", out var directPaymentElement) &&
-                             directPaymentElement.TryGetProperty("url", out var directUrlElement))
-                    {
-                        paymentUrl = directUrlElement.GetString();
-                    }
-                    else if (dokuResponse.TryGetProperty("url", out var directUrl))
-                    {
-                        paymentUrl = directUrl.GetString();
-                    }
-                    else if (dokuResponse.TryGetProperty("checkout_url", out var checkoutUrl))
-                    {
-                        paymentUrl = checkoutUrl.GetString();
-                    }
-                    else if (dokuResponse.TryGetProperty("payment_url", out var payUrl))
-                    {
-                        paymentUrl = payUrl.GetString();
-                    }
-
-                    if (!string.IsNullOrEmpty(paymentUrl))
-                    {
-                        return new DokuPaymentResponse { IsSuccess = true, PaymentUrl = paymentUrl };
-                    }
-
-                    _logger.LogError("Gagal mem-parsing URL pembayaran dari respons DOKU: {ResponseBody}", responseBody);
-                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Gagal mendapatkan URL pembayaran dari respons DOKU." };
+                    return new DokuPaymentResponse { IsSuccess = true, PaymentUrl = paymentUrl };
                 }
-                catch (JsonException ex)
-                {
-                    _logger.LogError(ex, "Error JSON saat mem-parsing respons DOKU. Body: {ResponseBody}", responseBody);
-                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Format respons dari DOKU tidak valid." };
-                }
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogError(ex, "HTTP Request Exception saat menghubungi DOKU API");
-                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"Gagal menghubungi DOKU API: {ex.Message}" };
+
+                _logger.LogError("Gagal mem-parsing URL pembayaran dari respons DOKU: {ResponseBody}", responseBody);
+                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Gagal mendapatkan URL pembayaran dari respons DOKU." };
             }
             catch (Exception ex)
             {
