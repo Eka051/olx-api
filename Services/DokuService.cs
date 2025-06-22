@@ -75,6 +75,7 @@ namespace olx_be_api.Services
             var hexBodyHash = BitConverter.ToString(bodyHash).Replace("-", "").ToLowerInvariant();
 
             var stringToSign = $"{httpMethod}:{endpointPath}:{clientId}:{hexBodyHash}:{timestamp}";
+
             using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey));
             var signatureBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(stringToSign));
             var finalSignature = Convert.ToBase64String(signatureBytes);
