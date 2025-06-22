@@ -39,7 +39,7 @@ namespace olx_be_api.Services
 
         public async Task<MidtransResponse> CreateSnapTransaction(MidtransRequest request)
         {
-            var midtransConfig = _configuration.GetSection("MidtransSettings");
+            var midtransConfig = _configuration.GetSection("Midtrans");
             var serverKey = midtransConfig["ServerKey"];
             var apiUrl = midtransConfig["ApiUrl"];
 
