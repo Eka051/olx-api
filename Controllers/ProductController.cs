@@ -118,9 +118,9 @@ namespace olx_be_api.Controllers
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> GetProductsByCategory([FromQuery] bool isMyAds = false, [FromQuery] int? categoryId = null)
+        public async Task<IActionResult> GetProductsByCategory(int categoryId, [FromQuery] bool isMyAds = false)
         {
-            if (categoryId == null || categoryId <= 0)
+            if (categoryId <= 0)
             {
                 return BadRequest(new ApiErrorResponse { success = false, message = "Invalid category ID." });
             }
