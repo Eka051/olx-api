@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
+using Newtonsoft.Json.Linq;
 
 namespace olx_be_api.Services
 {
@@ -34,6 +34,7 @@ namespace olx_be_api.Services
 
             if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(secretKey) || string.IsNullOrEmpty(apiBaseUrl) || string.IsNullOrEmpty(callbackUrl))
             {
+                _logger.LogError("Konfigurasi DOKU tidak lengkap.");
                 return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Konfigurasi DOKU tidak lengkap." };
             }
 
@@ -42,47 +43,42 @@ namespace olx_be_api.Services
             var requestPath = "/checkout/v1/payment";
             var fullUrl = apiBaseUrl.TrimEnd('/') + requestPath;
 
-            var payload = new
-            {
-                order = new
+            var lineItemsArray = new JArray(
+                request.LineItems.Select(item => new JObject
                 {
-                    amount = request.Amount,
-                    invoice_number = request.InvoiceNumber,
-                    currency = "IDR",
-                    callback_url = callbackUrl,
-                    line_items = request.LineItems.Select(item => new { name = item.Name, price = item.Price, quantity = item.Quantity }).ToArray()
+                    { "name", item.Name },
+                    { "price", item.Price },
+                    { "quantity", item.Quantity }
+                })
+            );
+
+            var payload = new JObject
+            {
+                { "order", new JObject
+                    {
+                        { "amount", request.Amount },
+                        { "invoice_number", request.InvoiceNumber },
+                        { "currency", "IDR" },
+                        { "callback_url", callbackUrl },
+                        { "line_items", lineItemsArray }
+                    }
                 },
-                payment = new { payment_due_date = 60 },
-                customer = new { name = request.CustomerName, email = request.CustomerEmail }
+                { "payment", new JObject
+                    {
+                        { "payment_due_date", 60 }
+                    }
+                },
+                { "customer", new JObject
+                    {
+                        { "name", request.CustomerName },
+                        { "email", request.CustomerEmail }
+                    }
+                }
             };
 
-            var jsonSettings = new JsonSerializerSettings
-            {
-                ContractResolver = new DefaultContractResolver { NamingStrategy = new SnakeCaseNamingStrategy() },
-                Formatting = Formatting.None,
-                NullValueHandling = NullValueHandling.Ignore
-            };
+            var requestJson = payload.ToString(Formatting.None);
 
-            var requestJson = JsonConvert.SerializeObject(payload, jsonSettings);
-
-            const string malformedPattern1 = "\";:";
-            const string correctPattern1 = "\":";
-            const string malformedPattern2 = "\";\": ";
-            const string correctPattern2 = "\":";
-            const string malformedPattern3 = "\";:";
-            const string correctPattern3 = "\":";
-
-            if (requestJson.Contains(malformedPattern1))
-            {
-                requestJson = requestJson.Replace(malformedPattern1, correctPattern1);
-            }
-            if (requestJson.Contains(malformedPattern2))
-            {
-                requestJson = requestJson.Replace(malformedPattern2, correctPattern2);
-            }
-            requestJson = System.Text.RegularExpressions.Regex.Replace(requestJson, @"""([^""]+)"";:", @"""$1"":");
-
-            _logger.LogInformation("Cleaned JSON payload: {RequestJson}", requestJson);
+            _logger.LogInformation("Generated JSON with JObject: {RequestJson}", requestJson);
 
             // Generate digest
             string digestValue;
@@ -100,7 +96,7 @@ namespace olx_be_api.Services
                                $"Request-Target:{requestPath}\n" +
                                $"Digest:{digestHeader}";
 
-            _logger.LogInformation("String to sign: {StringToSign}", stringToSign);
+            _logger.LogInformation("String-to-Sign: {StringToSign}", stringToSign);
 
             string signature;
             using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey)))
