@@ -1,12 +1,12 @@
 ﻿using System;
-using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
+
 namespace olx_be_api.Services
 {
     public class DokuService : IDokuService
@@ -14,12 +14,18 @@ namespace olx_be_api.Services
         private readonly HttpClient _httpClient;
         private readonly IConfiguration _configuration;
         private readonly ILogger<DokuService> _logger;
+        private readonly JsonSerializerOptions _jsonOptions;
 
         public DokuService(HttpClient httpClient, IConfiguration configuration, ILogger<DokuService> logger)
         {
             _httpClient = httpClient;
             _configuration = configuration;
             _logger = logger;
+            _jsonOptions = new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = false
+            };
         }
 
         public async Task<DokuPaymentResponse> CreatePayment(DokuPaymentRequest request)
@@ -41,42 +47,29 @@ namespace olx_be_api.Services
             var requestPath = "/checkout/v1/payment";
             var fullUrl = apiBaseUrl.TrimEnd('/') + requestPath;
 
-            var sb = new StringBuilder();
-            sb.Append("{");
-            sb.Append("\"order\":{");
-            sb.AppendFormat("\"amount\":{0},", request.Amount);
-            sb.AppendFormat("\"invoice_number\":\"{0}\",", request.InvoiceNumber);
-            sb.Append("\"currency\":\"IDR\",");
-            sb.AppendFormat("\"callback_url\":\"{0}\",", callbackUrl);
-            sb.Append("\"line_items\":[");
-
-            for (int i = 0; i < request.LineItems.Count; i++)
+            var payload = new DokuRequestPayload
             {
-                var item = request.LineItems[i];
-                sb.Append("{");
-                sb.AppendFormat("\"name\":\"{0}\",", JsonEscape(item.Name));
-                sb.AppendFormat("\"price\":{0},", item.Price);
-                sb.AppendFormat("\"quantity\":{0}", item.Quantity);
-                sb.Append("}");
-                if (i < request.LineItems.Count - 1)
+                Order = new DokuOrderRequest
                 {
-                    sb.Append(",");
+                    Amount = request.Amount,
+                    InvoiceNumber = request.InvoiceNumber,
+                    Currency = "IDR",
+                    CallbackUrl = callbackUrl,
+                    LineItems = request.LineItems
+                },
+                Payment = new DokuPaymentDetails
+                {
+                    PaymentDueDate = 60
+                },
+                Customer = new DokuCustomerDetails
+                {
+                    Name = request.CustomerName,
+                    Email = request.CustomerEmail
                 }
-            }
+            };
 
-            sb.Append("]"); 
-            sb.Append("},"); 
-            sb.Append("\"payment\":{");
-            sb.Append("\"payment_due_date\":60");
-            sb.Append("},");
-            sb.Append("\"customer\":{");
-            sb.AppendFormat("\"name\":\"{0}\",", JsonEscape(request.CustomerName));
-            sb.AppendFormat("\"email\":\"{0}\"", JsonEscape(request.CustomerEmail));
-            sb.Append("}");
-            sb.Append("}");
-
-            var requestJson = sb.ToString();
-            _logger.LogInformation("JSON Final yang Dibangun Manual: {RequestJson}", requestJson);
+            var requestJson = JsonSerializer.Serialize(payload, _jsonOptions);
+            _logger.LogInformation("JSON Request Payload: {RequestJson}", requestJson);
 
             string digestValue;
             using (var sha256 = SHA256.Create())
@@ -87,6 +80,7 @@ namespace olx_be_api.Services
             }
             var digestHeader = $"SHA-256={digestValue}";
 
+            // Generate signature
             var stringToSign = $"Client-Id:{clientId}\n" +
                                $"Request-Id:{requestId}\n" +
                                $"Request-Timestamp:{requestTimestamp}\n" +
@@ -117,16 +111,27 @@ namespace olx_be_api.Services
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogError("Gagal membuat pembayaran DOKU. Status: {StatusCode}, Body: {ResponseBody}", response.StatusCode, responseBody);
-                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"Error DOKU: {responseBody}" };
+                    _logger.LogError("Gagal membuat pembayaran DOKU. Status: {StatusCode}, Body: {ResponseBody}", 
+                        response.StatusCode, responseBody);
+                    return new DokuPaymentResponse { 
+                        IsSuccess = false, 
+                        ErrorMessage = $"Error DOKU: {responseBody}" 
+                    };
                 }
 
-                var dokuResponse = JsonConvert.DeserializeObject<dynamic>(responseBody);
-                string paymentUrl = dokuResponse?.response?.payment?.url!;
+                using var responseDoc = JsonDocument.Parse(responseBody);
+                var paymentUrl = responseDoc.RootElement
+                    .GetProperty("response")
+                    .GetProperty("payment")
+                    .GetProperty("url")
+                    .GetString();
 
                 if (string.IsNullOrEmpty(paymentUrl))
                 {
-                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Gagal mendapatkan URL pembayaran dari respons DOKU." };
+                    return new DokuPaymentResponse { 
+                        IsSuccess = false, 
+                        ErrorMessage = "Gagal mendapatkan URL pembayaran dari respons DOKU." 
+                    };
                 }
 
                 return new DokuPaymentResponse { IsSuccess = true, PaymentUrl = paymentUrl };
@@ -134,14 +139,11 @@ namespace olx_be_api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Terjadi kesalahan saat membuat pembayaran DOKU.");
-                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"Terjadi kesalahan sistem: {ex.Message}" };
+                return new DokuPaymentResponse { 
+                    IsSuccess = false, 
+                    ErrorMessage = $"Terjadi kesalahan sistem: {ex.Message}" 
+                };
             }
-        }
-
-        private string JsonEscape(string? s)
-        {
-            if (string.IsNullOrEmpty(s)) return "";
-            return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
         }
     }
 }

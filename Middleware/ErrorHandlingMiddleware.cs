@@ -2,7 +2,7 @@
 using System.Text.Json;
 using olx_be_api.Helpers;
 
-namespace API_Manajemen_Barang.Middleware
+namespace olx_be_api.Middleware
 {
     public class ErrorHandlingMiddleware
     {
