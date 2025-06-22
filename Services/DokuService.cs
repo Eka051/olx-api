@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
@@ -68,8 +69,17 @@ namespace olx_be_api.Services
                 }
             };
 
+            _logger.LogInformation("Payload.Order.Amount: {0}", payload.Order.Amount);
+            _logger.LogInformation("Payload.Order.InvoiceNumber: {0}", payload.Order.InvoiceNumber);
+            _logger.LogInformation("Payload.Order.LineItems.Count: {0}", payload.Order.LineItems?.Count ?? 0);
+            foreach (var item in payload.Order.LineItems!)
+            {
+                _logger.LogInformation("Item: Name={0}, Qty={1}, Price={2}", item.Name, item.Quantity, item.Price);
+            }
+
             var requestJson = JsonSerializer.Serialize(payload, _jsonOptions);
             _logger.LogInformation("FINAL JSON sebelum dikirim ke DOKU:\n{0}", requestJson);
+            await File.WriteAllTextAsync("doku_request_debug.json", requestJson);
 
             string digestValue;
             using (var sha256 = SHA256.Create())
@@ -97,6 +107,7 @@ namespace olx_be_api.Services
 
             _logger.LogInformation("Digest Header: {0}", digestHeader);
             _logger.LogInformation("Signature Header: {0}", signatureHeader);
+            _logger.LogInformation("StringToSign:\n{0}", stringToSign);
 
             try
             {
