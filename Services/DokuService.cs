@@ -65,14 +65,26 @@ namespace olx_be_api.Services
 
             var requestJson = JsonConvert.SerializeObject(payload, jsonSettings);
 
-            // Clean up JSON formatting issues
-            const string malformedPattern = "\";:";
-            const string correctPattern = "\":";
-            if (requestJson.Contains(malformedPattern))
-            {
-                requestJson = requestJson.Replace(malformedPattern, correctPattern);
-            }
+            const string malformedPattern1 = "\";:";
+            const string correctPattern1 = "\":";
+            const string malformedPattern2 = "\";\": ";
+            const string correctPattern2 = "\":";
+            const string malformedPattern3 = "\";:";
+            const string correctPattern3 = "\":";
 
+            if (requestJson.Contains(malformedPattern1))
+            {
+                requestJson = requestJson.Replace(malformedPattern1, correctPattern1);
+            }
+            if (requestJson.Contains(malformedPattern2))
+            {
+                requestJson = requestJson.Replace(malformedPattern2, correctPattern2);
+            }
+            requestJson = System.Text.RegularExpressions.Regex.Replace(requestJson, @"""([^""]+)"";:", @"""$1"":");
+
+            _logger.LogInformation("Cleaned JSON payload: {RequestJson}", requestJson);
+
+            // Generate digest
             string digestValue;
             using (var sha256 = SHA256.Create())
             {
