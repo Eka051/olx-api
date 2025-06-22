@@ -7,8 +7,6 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-
 namespace olx_be_api.Services
 {
     public class DokuService : IDokuService
@@ -43,44 +41,43 @@ namespace olx_be_api.Services
             var requestPath = "/checkout/v1/payment";
             var fullUrl = apiBaseUrl.TrimEnd('/') + requestPath;
 
-            var lineItemsArray = new JArray(
-                request.LineItems.Select(item => new JObject
-                {
-                    { "name", item.Name },
-                    { "price", item.Price },
-                    { "quantity", item.Quantity }
-                })
-            );
+            var sb = new StringBuilder();
+            sb.Append("{");
+            sb.Append("\"order\":{");
+            sb.AppendFormat("\"amount\":{0},", request.Amount);
+            sb.AppendFormat("\"invoice_number\":\"{0}\",", request.InvoiceNumber);
+            sb.Append("\"currency\":\"IDR\",");
+            sb.AppendFormat("\"callback_url\":\"{0}\",", callbackUrl);
+            sb.Append("\"line_items\":[");
 
-            var payload = new JObject
+            for (int i = 0; i < request.LineItems.Count; i++)
             {
-                { "order", new JObject
-                    {
-                        { "amount", request.Amount },
-                        { "invoice_number", request.InvoiceNumber },
-                        { "currency", "IDR" },
-                        { "callback_url", callbackUrl },
-                        { "line_items", lineItemsArray }
-                    }
-                },
-                { "payment", new JObject
-                    {
-                        { "payment_due_date", 60 }
-                    }
-                },
-                { "customer", new JObject
-                    {
-                        { "name", request.CustomerName },
-                        { "email", request.CustomerEmail }
-                    }
+                var item = request.LineItems[i];
+                sb.Append("{");
+                sb.AppendFormat("\"name\":\"{0}\",", JsonEscape(item.Name));
+                sb.AppendFormat("\"price\":{0},", item.Price);
+                sb.AppendFormat("\"quantity\":{0}", item.Quantity);
+                sb.Append("}");
+                if (i < request.LineItems.Count - 1)
+                {
+                    sb.Append(",");
                 }
-            };
+            }
 
-            var requestJson = payload.ToString(Formatting.None);
+            sb.Append("]"); 
+            sb.Append("},"); 
+            sb.Append("\"payment\":{");
+            sb.Append("\"payment_due_date\":60");
+            sb.Append("},");
+            sb.Append("\"customer\":{");
+            sb.AppendFormat("\"name\":\"{0}\",", JsonEscape(request.CustomerName));
+            sb.AppendFormat("\"email\":\"{0}\"", JsonEscape(request.CustomerEmail));
+            sb.Append("}");
+            sb.Append("}");
 
-            _logger.LogInformation("Generated JSON with JObject: {RequestJson}", requestJson);
+            var requestJson = sb.ToString();
+            _logger.LogInformation("JSON Final yang Dibangun Manual: {RequestJson}", requestJson);
 
-            // Generate digest
             string digestValue;
             using (var sha256 = SHA256.Create())
             {
@@ -95,8 +92,6 @@ namespace olx_be_api.Services
                                $"Request-Timestamp:{requestTimestamp}\n" +
                                $"Request-Target:{requestPath}\n" +
                                $"Digest:{digestHeader}";
-
-            _logger.LogInformation("String-to-Sign: {StringToSign}", stringToSign);
 
             string signature;
             using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey)))
@@ -115,12 +110,7 @@ namespace olx_be_api.Services
                 requestMessage.Headers.Add("Request-Timestamp", requestTimestamp);
                 requestMessage.Headers.Add("Digest", digestHeader);
                 requestMessage.Headers.Add("Signature", signatureHeader);
-
                 requestMessage.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
-
-                _logger.LogInformation("DOKU Request Headers - Client-Id: {ClientId}, Request-Id: {RequestId}, Request-Timestamp: {RequestTimestamp}, Digest: {Digest}, Signature: {Signature}",
-                    clientId, requestId, requestTimestamp, digestHeader, signatureHeader);
-                _logger.LogInformation("DOKU Request Body: {RequestBody}", requestJson);
 
                 var response = await _httpClient.SendAsync(requestMessage);
                 var responseBody = await response.Content.ReadAsStringAsync();
@@ -146,6 +136,12 @@ namespace olx_be_api.Services
                 _logger.LogError(ex, "Terjadi kesalahan saat membuat pembayaran DOKU.");
                 return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"Terjadi kesalahan sistem: {ex.Message}" };
             }
+        }
+
+        private string JsonEscape(string? s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
         }
     }
 }
