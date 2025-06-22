@@ -24,7 +24,7 @@ namespace olx_be_api.Services
             _serverKey = configuration["Midtrans:ServerKey"] ?? throw new ArgumentNullException("Midtrans:ServerKey");
             _clientKey = configuration["Midtrans:ClientKey"] ?? throw new ArgumentNullException("Midtrans:ClientKey");
             _isProduction = false;
-            _snapEndpoint = "https://app.sandbox.midtrans.com/snap/transactions";
+            _snapEndpoint = "https://app.sandbox.midtrans.com/snap/v1/transactions";
 
             var authHeaderValue = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{_serverKey}:"));
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authHeaderValue);
