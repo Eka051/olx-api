@@ -33,60 +33,73 @@ namespace olx_be_api.Services
             if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(secretKey) ||
                 string.IsNullOrEmpty(apiBaseUrl) || string.IsNullOrEmpty(callbackUrl))
             {
-                _logger.LogError("DokuSettings (ClientId, SecretKey, ApiUrl, atau CallbackUrl) tidak dikonfigurasi dengan benar.");
+                _logger.LogError("DokuSettings tidak dikonfigurasi dengan benar.");
                 return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Konfigurasi DOKU tidak lengkap." };
             }
 
             var requestId = Guid.NewGuid().ToString();
-            var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
+            var timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
             var httpMethod = "POST";
 
-            var payload = new
+            var payload = new Dictionary<string, object>
             {
-                order = new
+                ["order"] = new Dictionary<string, object>
                 {
-                    amount = request.Amount,
-                    invoice_number = request.InvoiceNumber,
-                    currency = "IDR",
-                    callback_url = callbackUrl,
-                    line_items = request.LineItems.Select(item => new
+                    ["amount"] = request.Amount,
+                    ["invoice_number"] = request.InvoiceNumber,
+                    ["currency"] = "IDR",
+                    ["callback_url"] = callbackUrl,
+                    ["line_items"] = request.LineItems.Select(item => new Dictionary<string, object>
                     {
-                        name = item.Name,
-                        price = item.Price,
-                        quantity = item.Quantity
+                        ["name"] = item.Name,
+                        ["price"] = item.Price,
+                        ["quantity"] = item.Quantity
                     }).ToArray()
                 },
-                payment = new { payment_due_date = 60 },
-                customer = new { name = request.CustomerName, email = request.CustomerEmail }
+                ["payment"] = new Dictionary<string, object>
+                {
+                    ["payment_due_date"] = 60
+                },
+                ["customer"] = new Dictionary<string, object>
+                {
+                    ["name"] = request.CustomerName,
+                    ["email"] = request.CustomerEmail
+                }
             };
 
             var jsonSettings = new JsonSerializerSettings
             {
+                Formatting = Formatting.None,
+                NullValueHandling = NullValueHandling.Ignore,
+                DefaultValueHandling = DefaultValueHandling.Include,
                 ContractResolver = new DefaultContractResolver
                 {
                     NamingStrategy = new SnakeCaseNamingStrategy()
-                },
-                NullValueHandling = NullValueHandling.Ignore,
-                Formatting = Formatting.None
+                }
             };
 
             var requestJson = JsonConvert.SerializeObject(payload, jsonSettings);
 
-            _logger.LogInformation("Minified JSON: {RequestJson}", requestJson);
+            _logger.LogInformation("=== DOKU SIGNATURE DEBUG ===");
+            _logger.LogInformation("1. HTTP Method: {HttpMethod}", httpMethod);
+            _logger.LogInformation("2. Endpoint Path: {EndpointPath}", endpointPath);
+            _logger.LogInformation("3. Client ID: {ClientId}", clientId);
+            _logger.LogInformation("4. Timestamp: {Timestamp}", timestamp);
+            _logger.LogInformation("5. Minified JSON: {RequestJson}", requestJson);
 
             string hexBodyHash;
             using (var sha256 = SHA256.Create())
             {
                 var bodyBytes = Encoding.UTF8.GetBytes(requestJson);
                 var hashBytes = sha256.ComputeHash(bodyBytes);
-                hexBodyHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                hexBodyHash = Convert.ToHexString(hashBytes).ToLowerInvariant();
             }
 
-            _logger.LogInformation("SHA256 Hash (hex lowercase): {Hash}", hexBodyHash);
+            _logger.LogInformation("6. SHA256 Hash: {Hash}", hexBodyHash);
 
             var stringToSign = $"{httpMethod}:{endpointPath}:{clientId}:{hexBodyHash}:{timestamp}";
 
-            _logger.LogInformation("StringToSign: {StringToSign}", stringToSign);
+            _logger.LogInformation("7. String to Sign: {StringToSign}", stringToSign);
 
             string finalSignature;
             using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey)))
@@ -96,7 +109,9 @@ namespace olx_be_api.Services
                 finalSignature = Convert.ToBase64String(signatureBytes);
             }
 
-            _logger.LogInformation("Final Signature: {Signature}", finalSignature);
+            _logger.LogInformation("8. Final Signature: {Signature}", finalSignature);
+            _logger.LogInformation("9. Header Value: HMACSHA256={Signature}", finalSignature);
+            _logger.LogInformation("=== END DEBUG ===");
 
             try
             {
@@ -109,36 +124,66 @@ namespace olx_be_api.Services
 
                 requestMessage.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
-                _logger.LogInformation("Sending request to: {Url}", fullUrl);
-                _logger.LogInformation("Headers: Client-Id={ClientId}, Request-Id={RequestId}, Request-Timestamp={Timestamp}, Signature=HMACSHA256={Signature}",
-                    clientId, requestId, timestamp, finalSignature);
+                _logger.LogInformation("Request Headers:");
+                _logger.LogInformation("  Client-Id: {ClientId}", clientId);
+                _logger.LogInformation("  Request-Id: {RequestId}", requestId);
+                _logger.LogInformation("  Request-Timestamp: {Timestamp}", timestamp);
+                _logger.LogInformation("  Signature: HMACSHA256={Signature}", finalSignature);
+                _logger.LogInformation("  Content-Type: application/json");
 
                 var response = await _httpClient.SendAsync(requestMessage);
                 var responseContent = await response.Content.ReadAsStringAsync();
 
                 _logger.LogInformation("Response Status: {StatusCode}", response.StatusCode);
+                _logger.LogInformation("Response Headers: {Headers}",
+                    string.Join(", ", response.Headers.Select(h => $"{h.Key}: {string.Join(", ", h.Value)}")));
                 _logger.LogInformation("Response Body: {Body}", responseContent);
 
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError("DOKU API Error: {StatusCode} - {Content}", response.StatusCode, responseContent);
-                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = responseContent };
+
+                    try
+                    {
+                        var errorResponse = JsonConvert.DeserializeObject<dynamic>(responseContent);
+                        var errorMessage = errorResponse?.error?.message?.ToString() ?? "Unknown error";
+                        var errorCode = errorResponse?.error?.code?.ToString() ?? "unknown_error";
+
+                        return new DokuPaymentResponse
+                        {
+                            IsSuccess = false,
+                            ErrorMessage = $"DOKU Error [{errorCode}]: {errorMessage}"
+                        };
+                    }
+                    catch
+                    {
+                        return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = responseContent };
+                    }
                 }
 
                 try
                 {
                     var result = JsonConvert.DeserializeObject<dynamic>(responseContent);
 
+                    _logger.LogInformation("Response structure analysis:");
+                    if (result != null)
+                    {
+                        var properties = ((Newtonsoft.Json.Linq.JObject)result).Properties().Select(p => p.Name);
+                        _logger.LogInformation("Root properties: {Properties}", string.Join(", ", properties));
+                    }
+
                     string? paymentUrl = null;
 
                     if (result?.response?.payment?.url != null)
-                        paymentUrl = result.response.payment.url;
+                        paymentUrl = result.response.payment.url.ToString();
                     else if (result?.payment?.url != null)
-                        paymentUrl = result.payment.url;
+                        paymentUrl = result.payment.url.ToString();
                     else if (result?.url != null)
-                        paymentUrl = result.url;
+                        paymentUrl = result.url.ToString();
                     else if (result?.data?.payment_url != null)
-                        paymentUrl = result.data.payment_url;
+                        paymentUrl = result.data.payment_url.ToString();
+                    else if (result?.checkout_url != null)
+                        paymentUrl = result.checkout_url.ToString();
 
                     if (!string.IsNullOrEmpty(paymentUrl))
                     {
@@ -147,7 +192,11 @@ namespace olx_be_api.Services
                     }
 
                     _logger.LogWarning("Payment URL not found in response. Full response: {Response}", responseContent);
-                    return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "URL pembayaran tidak ditemukan dalam respons." };
+                    return new DokuPaymentResponse
+                    {
+                        IsSuccess = false,
+                        ErrorMessage = "URL pembayaran tidak ditemukan dalam respons. Response: " + responseContent
+                    };
                 }
                 catch (JsonException jsonEx)
                 {
@@ -155,20 +204,10 @@ namespace olx_be_api.Services
                     return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Error parsing response dari DOKU." };
                 }
             }
-            catch (HttpRequestException httpEx)
-            {
-                _logger.LogError(httpEx, "HTTP error saat mengirim request ke DOKU");
-                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"HTTP Error: {httpEx.Message}" };
-            }
-            catch (TaskCanceledException tcEx)
-            {
-                _logger.LogError(tcEx, "Timeout saat mengirim request ke DOKU");
-                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Request timeout ke DOKU API." };
-            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unexpected error saat mengirim request ke DOKU");
-                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = $"Unexpected error: {ex.Message}" };
+                _logger.LogError(ex, "Error saat mengirim request ke DOKU");
+                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = ex.Message };
             }
         }
     }
