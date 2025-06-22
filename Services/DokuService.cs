@@ -69,7 +69,7 @@ namespace olx_be_api.Services
             var requestBodyBytes = Encoding.UTF8.GetBytes(requestJson);
             using var sha256 = SHA256.Create();
             var hashBytes = sha256.ComputeHash(requestBodyBytes);
-            var digest = Convert.ToBase64String(hashBytes);
+            var digest = "SHA-256=" + Convert.ToBase64String(hashBytes);
 
             var signatureComponent = $"Client-Id:{clientId}\n" +
                                    $"Request-Id:{requestId}\n" +
@@ -89,7 +89,6 @@ namespace olx_be_api.Services
             _logger.LogInformation("Digest: {Digest}", digest);
             _logger.LogInformation("String-to-Sign: {StringToSign}", signatureComponent.Replace("\n", "\\n"));
             _logger.LogInformation("Signature: {Signature}", signature);
-
             _logger.LogInformation("Full Request URL: {FullRequestUrl}", apiUrl);
 
             try
@@ -99,6 +98,7 @@ namespace olx_be_api.Services
                 httpRequest.Headers.Add("Client-Id", clientId);
                 httpRequest.Headers.Add("Request-Id", requestId);
                 httpRequest.Headers.Add("Request-Timestamp", requestTimestamp);
+                httpRequest.Headers.Add("Digest", digest);
                 httpRequest.Headers.Add("Signature", $"HMACSHA256={signature}");
 
                 httpRequest.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
@@ -133,7 +133,6 @@ namespace olx_be_api.Services
                 try
                 {
                     var dokuResponse = JsonSerializer.Deserialize<JsonElement>(responseBody);
-
                     string? paymentUrl = null;
 
                     if (dokuResponse.TryGetProperty("response", out var responseElement) &&
