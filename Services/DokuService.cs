@@ -69,7 +69,7 @@ namespace olx_be_api.Services
             };
 
             var requestJson = JsonSerializer.Serialize(payload, _jsonOptions);
-            _logger.LogInformation("JSON Request Payload: {RequestJson}", requestJson);
+            _logger.LogInformation("FINAL JSON sebelum dikirim ke DOKU:\n{0}", requestJson);
 
             string digestValue;
             using (var sha256 = SHA256.Create())
@@ -80,7 +80,6 @@ namespace olx_be_api.Services
             }
             var digestHeader = $"SHA-256={digestValue}";
 
-            // Generate signature
             var stringToSign = $"Client-Id:{clientId}\n" +
                                $"Request-Id:{requestId}\n" +
                                $"Request-Timestamp:{requestTimestamp}\n" +
@@ -95,6 +94,9 @@ namespace olx_be_api.Services
                 signature = Convert.ToBase64String(signatureBytes);
             }
             var signatureHeader = $"HMACSHA256={signature}";
+
+            _logger.LogInformation("Digest Header: {0}", digestHeader);
+            _logger.LogInformation("Signature Header: {0}", signatureHeader);
 
             try
             {
@@ -111,11 +113,11 @@ namespace olx_be_api.Services
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogError("Gagal membuat pembayaran DOKU. Status: {StatusCode}, Body: {ResponseBody}", 
-                        response.StatusCode, responseBody);
-                    return new DokuPaymentResponse { 
-                        IsSuccess = false, 
-                        ErrorMessage = $"Error DOKU: {responseBody}" 
+                    _logger.LogError("Gagal membuat pembayaran DOKU. Status: {0}, Body: {1}", response.StatusCode, responseBody);
+                    return new DokuPaymentResponse
+                    {
+                        IsSuccess = false,
+                        ErrorMessage = $"Error DOKU: {responseBody}"
                     };
                 }
 
@@ -128,9 +130,10 @@ namespace olx_be_api.Services
 
                 if (string.IsNullOrEmpty(paymentUrl))
                 {
-                    return new DokuPaymentResponse { 
-                        IsSuccess = false, 
-                        ErrorMessage = "Gagal mendapatkan URL pembayaran dari respons DOKU." 
+                    return new DokuPaymentResponse
+                    {
+                        IsSuccess = false,
+                        ErrorMessage = "Gagal mendapatkan URL pembayaran dari respons DOKU."
                     };
                 }
 
@@ -139,9 +142,10 @@ namespace olx_be_api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Terjadi kesalahan saat membuat pembayaran DOKU.");
-                return new DokuPaymentResponse { 
-                    IsSuccess = false, 
-                    ErrorMessage = $"Terjadi kesalahan sistem: {ex.Message}" 
+                return new DokuPaymentResponse
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"Terjadi kesalahan sistem: {ex.Message}"
                 };
             }
         }
