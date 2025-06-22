@@ -105,6 +105,7 @@ namespace olx_be_api.Controllers
             }
 
             user.Name = profileDto.Name ?? user.Name;
+            user.Email = profileDto.Email ?? user.Email;
             user.PhoneNumber = profileDto.PhoneNumber ?? user.PhoneNumber;
 
             _context.Users.Update(user);
