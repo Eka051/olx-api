@@ -95,6 +95,7 @@ namespace olx_be_api.Controllers
                 Description = p.Description ?? string.Empty,
                 Price = p.Price,
                 IsSold = p.IsSold,
+                IsActive = p.IsActive,
                 CreatedAt = p.CreatedAt,
                 CategoryId = p.CategoryId ?? 0,
                 CategoryName = p.Category != null ? p.Category.Name : "N/A",
