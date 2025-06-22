@@ -41,7 +41,6 @@ namespace olx_be_api.Services
             var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
             var httpMethod = "POST";
 
-            // Pastikan payload sesuai dengan format yang diharapkan DOKU
             var payload = new
             {
                 order = new
@@ -61,7 +60,6 @@ namespace olx_be_api.Services
                 customer = new { name = request.CustomerName, email = request.CustomerEmail }
             };
 
-            // Konfigurasi JSON serialization yang konsisten
             var jsonSettings = new JsonSerializerSettings
             {
                 ContractResolver = new DefaultContractResolver
@@ -69,15 +67,13 @@ namespace olx_be_api.Services
                     NamingStrategy = new SnakeCaseNamingStrategy()
                 },
                 NullValueHandling = NullValueHandling.Ignore,
-                Formatting = Formatting.None // Pastikan tidak ada whitespace
+                Formatting = Formatting.None
             };
 
-            // Serialize payload ke JSON minified
             var requestJson = JsonConvert.SerializeObject(payload, jsonSettings);
 
             _logger.LogInformation("Minified JSON: {RequestJson}", requestJson);
 
-            // Hitung SHA256 hash dari JSON body
             string hexBodyHash;
             using (var sha256 = SHA256.Create())
             {
@@ -88,12 +84,10 @@ namespace olx_be_api.Services
 
             _logger.LogInformation("SHA256 Hash (hex lowercase): {Hash}", hexBodyHash);
 
-            // Buat string yang akan di-sign sesuai format DOKU
             var stringToSign = $"{httpMethod}:{endpointPath}:{clientId}:{hexBodyHash}:{timestamp}";
 
             _logger.LogInformation("StringToSign: {StringToSign}", stringToSign);
 
-            // Generate signature menggunakan HMAC-SHA256
             string finalSignature;
             using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey)))
             {
@@ -108,13 +102,11 @@ namespace olx_be_api.Services
             {
                 var requestMessage = new HttpRequestMessage(HttpMethod.Post, fullUrl);
 
-                // Set headers sesuai dokumentasi DOKU
                 requestMessage.Headers.Add("Client-Id", clientId);
                 requestMessage.Headers.Add("Request-Id", requestId);
                 requestMessage.Headers.Add("Request-Timestamp", timestamp);
                 requestMessage.Headers.Add("Signature", $"HMACSHA256={finalSignature}");
 
-                // Set content dengan encoding yang tepat
                 requestMessage.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
                 _logger.LogInformation("Sending request to: {Url}", fullUrl);
@@ -133,12 +125,10 @@ namespace olx_be_api.Services
                     return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = responseContent };
                 }
 
-                // Parse response untuk mendapatkan payment URL
                 try
                 {
                     var result = JsonConvert.DeserializeObject<dynamic>(responseContent);
 
-                    // Coba berbagai kemungkinan path untuk payment URL
                     string? paymentUrl = null;
 
                     if (result?.response?.payment?.url != null)
