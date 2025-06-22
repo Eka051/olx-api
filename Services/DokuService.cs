@@ -1,13 +1,13 @@
 ﻿using System;
+using System.Linq;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 
 namespace olx_be_api.Services
 {
@@ -53,26 +53,25 @@ namespace olx_be_api.Services
                     callback_url = callbackUrl,
                     line_items = request.LineItems.Select(item => new { name = item.Name, price = item.Price, quantity = item.Quantity }).ToArray()
                 },
-                payment = new
-                {
-                    payment_due_date = 60
-                },
-                customer = new
-                {
-                    name = request.CustomerName,
-                    email = request.CustomerEmail
-                }
+                payment = new { payment_due_date = 60 },
+                customer = new { name = request.CustomerName, email = request.CustomerEmail }
             };
 
-            var jsonOptions = new JsonSerializerOptions
+            var jsonSettings = new JsonSerializerSettings
             {
-                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+                ContractResolver = new DefaultContractResolver { NamingStrategy = new SnakeCaseNamingStrategy() },
+                Formatting = Formatting.None,
+                NullValueHandling = NullValueHandling.Ignore
             };
 
-            var requestJson = JsonSerializer.Serialize(payload, jsonOptions);
+            var requestJson = JsonConvert.SerializeObject(payload, jsonSettings);
 
-            // 1. Generate Digest
+            if (requestJson.Contains(';'))
+            {
+                _logger.LogCritical("JSON YANG DIHASILKAN TIDAK VALID! Ditemukan titik koma (;) di dalamnya. Body: {RequestBody}", requestJson);
+                return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Terjadi error internal saat membuat data request. Ditemukan karakter tidak valid." };
+            }
+
             string digest;
             using (var sha256 = SHA256.Create())
             {
@@ -82,14 +81,12 @@ namespace olx_be_api.Services
             }
             var digestHeader = $"SHA-256={digest}";
 
-            // 2. Generate String-to-Sign
             var stringToSign = $"Client-Id:{clientId}\n" +
                                $"Request-Id:{requestId}\n" +
                                $"Request-Timestamp:{requestTimestamp}\n" +
                                $"Request-Target:{requestPath}\n" +
                                $"Digest:{digestHeader}";
 
-            // 3. Generate Signature
             string signature;
             using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey)))
             {
@@ -99,11 +96,9 @@ namespace olx_be_api.Services
             }
             var signatureHeader = $"HMACSHA256={signature}";
 
-            // Logging for debugging
             _logger.LogInformation("--- DOKU Checkout Signature Generation ---");
             _logger.LogInformation("Request-Id: {RequestId}", requestId);
             _logger.LogInformation("Request-Timestamp: {RequestTimestamp}", requestTimestamp);
-            _logger.LogInformation("Request-Target: {RequestTarget}", requestPath);
             _logger.LogInformation("Minified JSON Body: {RequestBody}", requestJson);
             _logger.LogInformation("Digest Header: {DigestHeader}", digestHeader);
             _logger.LogInformation("String-to-Sign:\n{StringToSign}", stringToSign);
@@ -131,15 +126,8 @@ namespace olx_be_api.Services
 
                 _logger.LogInformation("Berhasil membuat pembayaran DOKU. Response: {ResponseBody}", responseBody);
 
-                var dokuResponse = JsonSerializer.Deserialize<JsonElement>(responseBody);
-                string paymentUrl = null!;
-
-                if (dokuResponse.TryGetProperty("response", out var responseElement) &&
-                    responseElement.TryGetProperty("payment", out var paymentElement) &&
-                    paymentElement.TryGetProperty("url", out var urlElement))
-                {
-                    paymentUrl = urlElement.GetString()!;
-                }
+                var dokuResponse = JsonConvert.DeserializeObject<dynamic>(responseBody);
+                string paymentUrl = dokuResponse?.response?.payment?.url!;
 
                 if (string.IsNullOrEmpty(paymentUrl))
                 {
