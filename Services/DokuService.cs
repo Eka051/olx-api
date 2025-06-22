@@ -24,12 +24,13 @@ namespace olx_be_api.Services
             var dokuConfig = _configuration.GetSection("DokuSettings");
             var clientId = dokuConfig["ClientId"];
             var secretKey = dokuConfig["SecretKey"];
-            var callbackUrl = dokuConfig["CallbackUrl"];
+            var apiUrl = dokuConfig["ApiUrl"];
+            var callbackUrl = dokuConfig["CallbackUrl"]?.Trim();
             var requestPath = "/checkout/v1/payment";
 
-            if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(secretKey) || string.IsNullOrEmpty(callbackUrl))
+            if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(secretKey) || string.IsNullOrEmpty(apiUrl) || string.IsNullOrEmpty(callbackUrl))
             {
-                _logger.LogError("DokuSettings (ClientId, SecretKey, atau CallbackUrl) tidak dikonfigurasi dengan benar.");
+                _logger.LogError("DokuSettings (ClientId, SecretKey, ApiUrl, atau CallbackUrl) tidak dikonfigurasi dengan benar.");
                 return new DokuPaymentResponse { IsSuccess = false, ErrorMessage = "Konfigurasi DOKU tidak lengkap." };
             }
 
@@ -72,15 +73,15 @@ namespace olx_be_api.Services
             var signature = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(signatureComponent)));
 
             _logger.LogInformation("--- DOKU Payment Creation ---");
-            _logger.LogInformation("Request-Id: {RequestId}", requestId);
-            _logger.LogInformation("Request-Timestamp: {RequestTimestamp}", requestTimestamp);
             _logger.LogInformation("Request-Target: {RequestTarget}", requestPath);
             _logger.LogInformation("Request Body (JSON): {RequestBody}", requestJson);
             _logger.LogInformation("Digest: {Digest}", digest);
             _logger.LogInformation("String-to-Sign: {StringToSign}", signatureComponent.Replace("\n", "\\n"));
-            _logger.LogInformation("Final Signature (HMACSHA256): {Signature}", signature);
 
-            var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestPath);
+            var fullRequestUrl = apiUrl.TrimEnd('/') + requestPath;
+            _logger.LogInformation("Full Request URL: {FullRequestUrl}", fullRequestUrl);
+
+            var httpRequest = new HttpRequestMessage(HttpMethod.Post, fullRequestUrl);
             httpRequest.Headers.Add("Client-Id", clientId);
             httpRequest.Headers.Add("Request-Id", requestId);
             httpRequest.Headers.Add("Request-Timestamp", requestTimestamp);
