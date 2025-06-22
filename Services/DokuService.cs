@@ -61,7 +61,8 @@ namespace olx_be_api.Services
 
             var options = new JsonSerializerOptions
             {
-                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
             };
 
             var requestJson = JsonSerializer.Serialize(payload, options);
