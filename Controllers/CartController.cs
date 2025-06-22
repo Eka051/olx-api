@@ -73,14 +73,28 @@ namespace olx_be_api.Controllers
             }
 
             var userId = User.GetUserId();
+            
             var adPackage = await _context.AdPackages.FindAsync(cartCreateDto.AdPackageId);
             if (adPackage == null)
             {
                 return NotFound(new ApiErrorResponse { success = false, message = "Paket iklan tidak ditemukan" });
             }
+            
+            var product = await _context.Products.FindAsync(cartCreateDto.ProductId);
+            if (product == null)
+            {
+                return NotFound(new ApiErrorResponse { success = false, message = "Produk tidak ditemukan" });
+            }
+            
+            if (product.UserId != userId)
+            {
+                return BadRequest(new ApiErrorResponse { success = false, message = "Anda hanya dapat membeli paket iklan untuk produk milik sendiri" });
+            }
 
             var existingCartItem = await _context.CartItems
-                .FirstOrDefaultAsync(ci => ci.UserId == userId && ci.AdPackageId == cartCreateDto.AdPackageId);
+                .FirstOrDefaultAsync(ci => ci.UserId == userId && 
+                                     ci.AdPackageId == cartCreateDto.AdPackageId && 
+                                     ci.ProductId == cartCreateDto.ProductId);
 
             if (existingCartItem != null)
             {
@@ -91,8 +105,10 @@ namespace olx_be_api.Controllers
             {
                 var cartItem = new CartItem
                 {
+                    Id = Guid.NewGuid(),
                     UserId = userId,
                     AdPackageId = cartCreateDto.AdPackageId,
+                    ProductId = cartCreateDto.ProductId,
                     Quantity = cartCreateDto.Quantity
                 };
                 _context.CartItems.Add(cartItem);

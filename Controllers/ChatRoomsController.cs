@@ -107,23 +107,35 @@ namespace olx_be_api.Controllers
                 .ToListAsync();
 
             var chatRoomIds = chatRooms.Select(c => c.Id).ToList();
-            var messagesQuery = _context.Messages
+            
+            // Get all messages for these chat rooms in one query
+            var allMessages = await _context.Messages
                 .Where(m => chatRoomIds.Contains(m.ChatRoomId))
-                .GroupBy(m => m.ChatRoomId);
-
-            var lastMessages = await messagesQuery
-                .Select(g => g.OrderByDescending(m => m.CreatedAt).FirstOrDefault())
-                .Where(m => m != null)
-                .ToDictionaryAsync(m => m!.ChatRoomId, m => m);
-
-            var unreadCounts = await messagesQuery
-                .Select(g => new
+                .ToListAsync();
+            
+            // Process data in memory instead of complex EF Core translations
+            var lastMessagesDict = new Dictionary<Guid, Message>();
+            var unreadCountsDict = new Dictionary<Guid, int>();
+            
+            foreach (var chatRoomId in chatRoomIds)
+            {
+                var messagesForRoom = allMessages.Where(m => m.ChatRoomId == chatRoomId).ToList();
+                
+                // Find last message
+                var lastMessage = messagesForRoom
+                    .OrderByDescending(m => m.CreatedAt)
+                    .FirstOrDefault();
+                
+                if (lastMessage != null)
                 {
-                    ChatRoomId = g.Key,
-                    UnreadCount = g.Count(m => !m.IsRead && m.SenderId != userId)
-                })
-                .ToDictionaryAsync(x => x.ChatRoomId, x => x.UnreadCount);
-
+                    lastMessagesDict[chatRoomId] = lastMessage;
+                }
+                
+                // Count unread messages
+                var unreadCount = messagesForRoom.Count(m => !m.IsRead && m.SenderId != userId);
+                unreadCountsDict[chatRoomId] = unreadCount;
+            }
+            
             var response = chatRooms.Select(c => new ChatRoomResponseDto
             {
                 Id = c.Id,
@@ -134,9 +146,9 @@ namespace olx_be_api.Controllers
                 SellerId = c.SellerId,
                 SellerName = c.Seller.Name,
                 CreatedAt = c.CreatedAt,
-                LastMessage = lastMessages.ContainsKey(c.Id) ? lastMessages[c.Id]!.Content : null,
-                LastMessageAt = lastMessages.ContainsKey(c.Id) ? lastMessages[c.Id]!.CreatedAt : c.CreatedAt,
-                UnreadCount = unreadCounts.ContainsKey(c.Id) ? unreadCounts[c.Id] : 0
+                LastMessage = lastMessagesDict.ContainsKey(c.Id) ? lastMessagesDict[c.Id].Content : null,
+                LastMessageAt = lastMessagesDict.ContainsKey(c.Id) ? lastMessagesDict[c.Id].CreatedAt : c.CreatedAt,
+                UnreadCount = unreadCountsDict.ContainsKey(c.Id) ? unreadCountsDict[c.Id] : 0
             }).ToList();
 
             return Ok(new ApiResponse<List<ChatRoomResponseDto>>
