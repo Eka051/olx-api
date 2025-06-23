@@ -5,6 +5,7 @@
         public string TransactionDetails { get; set; }
         public string InvoiceNumber { get; set; }
         public decimal Amount { get; set; }
+        public MidtransCallbacks Callbacks { get; set; }
         public CustomerDetails CustomerDetails { get; set; }
         public List<ItemDetails> ItemDetails { get; set; }
     }
