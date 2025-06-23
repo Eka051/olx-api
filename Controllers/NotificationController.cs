@@ -1,17 +1,21 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json;
 using olx_be_api.Data;
+using olx_be_api.Helpers;
 using olx_be_api.Models;
 using olx_be_api.Models.Enums;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace olx_be_api.Controllers
 {
-    [Route("api/payments/notifications")]
+    [Route("api/notifications")]
     [ApiController]
     public class NotificationController : ControllerBase
     {
@@ -24,11 +28,58 @@ namespace olx_be_api.Controllers
             _configuration = configuration;
         }
 
-        [HttpPost]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        [HttpGet]
+        [Authorize]
+        public async Task<IActionResult> GetMyNotifications()
+        {
+            var userId = User.GetUserId();
+            var notifications = await _context.Notifications
+                .Where(n => n.UserId == userId)
+                .OrderByDescending(n => n.CreatedAt)
+                .ToListAsync();
+
+            return Ok(new ApiResponse<List<Notification>>
+            {
+                success = true,
+                message = "Notifications retrieved successfully",
+                data = notifications
+            });
+        }
+
+        [HttpPost("{id:int}/read")]
+        [Authorize]
+        public async Task<IActionResult> MarkAsRead(int id)
+        {
+            var userId = User.GetUserId();
+            var notification = await _context.Notifications.FirstOrDefaultAsync(n => n.Id == Guid.Parse(id.ToString()) && n.UserId == userId);
+
+            if (notification == null)
+            {
+                return NotFound(new ApiErrorResponse { message = "Notification not found." });
+            }
+
+            notification.IsRead = true;
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        [HttpGet("unread-count")]
+        [Authorize]
+        public async Task<IActionResult> GetUnreadCount()
+        {
+            var userId = User.GetUserId();
+            var count = await _context.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead);
+
+            return Ok(new ApiResponse<int>
+            {
+                success = true,
+                message = "Unread count retrieved",
+                data = count
+            });
+        }
+
+        [HttpPost("webhook")]
         public async Task<IActionResult> HandleNotification()
         {
             string requestBody;
