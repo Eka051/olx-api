@@ -30,6 +30,9 @@ namespace olx_be_api.Controllers
 
         [HttpGet]
         [Authorize]
+        [ProducesResponseType(typeof(ApiResponse<List<Notification>>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> GetMyNotifications()
         {
             var userId = User.GetUserId();
@@ -37,6 +40,11 @@ namespace olx_be_api.Controllers
                 .Where(n => n.UserId == userId)
                 .OrderByDescending(n => n.CreatedAt)
                 .ToListAsync();
+
+            if (notifications == null || !notifications.Any())
+            {
+                return NotFound(new ApiResponse<Notification> { success = false, message = "Data Notifikasi tidak ditemukan"});
+            }
 
             return Ok(new ApiResponse<List<Notification>>
             {
@@ -48,6 +56,9 @@ namespace olx_be_api.Controllers
 
         [HttpPost("{id:int}/read")]
         [Authorize]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> MarkAsRead(int id)
         {
             var userId = User.GetUserId();
@@ -80,6 +91,10 @@ namespace olx_be_api.Controllers
         }
 
         [HttpPost("webhook")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> HandleNotification()
         {
             string requestBody;
