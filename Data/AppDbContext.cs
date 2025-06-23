@@ -80,9 +80,10 @@ namespace olx_be_api.Data
                     .WithOne(f => f.Product)
                     .HasForeignKey(f => f.ProductId)
                     .OnDelete(DeleteBehavior.Cascade);
+
                 entity.HasMany(p => p.ActiveFeatures)
-                       .WithOne(af => af.Product)
-                       .HasForeignKey(af => af.ProductId);
+                    .WithOne(af => af.Product)
+                    .HasForeignKey(af => af.ProductId);
             });
 
             modelBuilder.Entity<ProductImage>(entity =>
