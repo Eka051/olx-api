@@ -24,6 +24,7 @@ namespace olx_be_api.DTO
         public int Quantity { get; set; }
         public long ProductId { get; set; }
         public string ProductTitle { get; set; } = null!;
+        public int Price { get; set; }
         public Guid UserId { get; set; }
         public string UserName { get; set; } = null!;
     }

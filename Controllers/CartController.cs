@@ -52,6 +52,7 @@ namespace olx_be_api.Controllers
                 Quantity = ci.Quantity,
                 ProductId = ci.Product.Id,
                 ProductTitle = ci.Product.Title,
+                Price = ci.Product.Price,
                 UserId = ci.UserId,
                 UserName = ci.User.Name!
             }).ToList();
