@@ -813,26 +813,28 @@
                 const revenueData = chartData ? chartData.revenueData : [280000, 480000, 400000, 190000, 860000, 270000];
 
                 window.myChart = new Chart(ctx, {
-                    type: 'bar',
                     data: {
                         labels: labels,
                         datasets: [
                             {
+                                type: 'bar', 
                                 label: 'Pendapatan (Rp)',
                                 data: revenueData,
                                 backgroundColor: 'rgba(54, 162, 235, 0.6)',
                                 borderColor: 'rgba(54, 162, 235, 1)',
                                 borderWidth: 1,
                                 yAxisID: 'y-revenue',
+                                order: 2 
                             },
                             {
                                 label: 'Pengguna Baru',
                                 data: usersData,
-                                type: 'line',
+                                type: 'line', 
                                 borderColor: '#3977FE',
                                 tension: 0.4,
                                 fill: false,
                                 yAxisID: 'y-users',
+                                order: 1 
                             }
                         ]
                     },
